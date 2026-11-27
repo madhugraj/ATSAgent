@@ -25,12 +25,14 @@ const {
   orgMembers,
   organizations,
   requisitions,
+  stageEvents,
   users,
 } = await import("../drizzle/schema");
 const sourcing = await import("../src/server/agents/sourcing.server");
 const desk = await import("../src/server/desk/desk.server");
 await import("../src/server/agents");
 const { getTool } = await import("../src/server/agents/registry");
+const contact = await import("../src/lib/pool-contact.server");
 
 const stamp = Date.now();
 let orgId: string;
@@ -232,6 +234,103 @@ describe("new CV → open roles", () => {
     expect(audit!.entityId).toBe(role);
     // A pool match is not channel traction.
     expect((await sourcing.roleTraction(orgId, role)).applicants.last7Days).toBe(0);
+  });
+});
+
+describe("talent-pool contact", () => {
+  const ctx = () =>
+    ({
+      orgId,
+      principalUserId: userId,
+      runId: crypto.randomUUID(),
+      agentType: "sourcing",
+      actor: "agent:sourcing:test",
+    }) as never;
+
+  test("a pool match is told once that it is being considered, with an opt-out link", async () => {
+    const { matchNewCvsToRoles } = await import("../src/server/agents/pool-match.server");
+    const meera = await candidate("Meera", { skills: ["Figma"] });
+    await candidate("NoConsent", { skills: ["Figma"], consentGiven: false });
+    await candidate("Gone", { skills: ["Figma"], contactOptOutAt: new Date() });
+    const r = await matchNewCvsToRoles(orgId);
+    // Opted-out people are never matched; no-consent people are matched but not emailed.
+    expect(r.added.map((a) => a.name).sort()).toEqual(["Meera", "NoConsent"]);
+    const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    expect(mails).toHaveLength(1);
+    expect(mails[0]).toMatchObject({ kind: "pool_match_intro", templateName: "pool_match_intro" });
+    expect(mails[0]!.idempotencyKey).toBe(`pool_match_intro:${role}:${meera}`);
+    expect(mails[0]!.templateData.jobTitle).toBe("UI/UX Engineer");
+    expect(mails[0]!.templateData.optOutUrl).toContain(
+      encodeURIComponent(contact.optOutToken(meera)),
+    );
+  });
+
+  test("one invitation or introduction per person per 14 days, across roles", async () => {
+    const priya = await candidate("Priya");
+    await apply(earlier, priya, "l1");
+    await db.insert(emailOutbox).values({
+      orgId,
+      kind: "pool_match_intro",
+      templateName: "pool_match_intro",
+      toEmail: "p@x.local",
+      idempotencyKey: `pool_match_intro:${earlier}:${priya}`,
+      status: "sent",
+    });
+    expect((await sourcing.pastCandidates(orgId, role)).matches).toHaveLength(0);
+    expect([...(await contact.recentlyContacted(orgId, [priya]))]).toEqual([priya]);
+    await db
+      .update(emailOutbox)
+      .set({ createdAt: new Date(Date.now() - 15 * 864e5) })
+      .where(eq(emailOutbox.orgId, orgId));
+    expect((await sourcing.pastCandidates(orgId, role)).matches.map((m) => m.name)).toEqual([
+      "Priya",
+    ]);
+  });
+
+  test("rejected after an interview round can be invited; rejected at screening cannot", async () => {
+    const late = await candidate("Late");
+    const lateApp = await apply(earlier, late, "rejected");
+    await db.insert(stageEvents).values({
+      orgId,
+      applicationId: lateApp,
+      fromStage: "shortlisted",
+      toStage: "l1",
+      actor: "test",
+    } as never);
+    await apply(earlier, await candidate("Early"), "rejected");
+    expect((await sourcing.pastCandidates(orgId, role)).matches.map((m) => m.name)).toEqual([
+      "Late",
+    ]);
+  });
+
+  test("opting out: bad tokens refused, queued outreach suppressed, invitations skip them (audited)", async () => {
+    const asha = await candidate("Asha");
+    await apply(earlier, asha, "l1");
+    expect(contact.verifyOptOutToken(`${asha}.forged`)).toBeNull();
+    expect(await contact.recordOptOut(`${asha}.forged`)).toBeNull();
+    await db.insert(emailOutbox).values({
+      orgId,
+      kind: "role_invite",
+      templateName: "role_invite",
+      toEmail: "a@x.local",
+      idempotencyKey: `role_invite:${earlier}:${asha}:1`,
+    });
+    expect(await contact.recordOptOut(contact.optOutToken(asha))).toBe("Sourcing Org");
+    expect(await contact.recordOptOut(contact.optOutToken(asha))).toBe("Sourcing Org");
+    const [mail] = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    expect(mail!.status).toBe("suppressed");
+    expect((await sourcing.pastCandidates(orgId, role)).matches).toHaveLength(0);
+    const out = (await getTool("invite_to_apply")!.run(ctx(), {
+      requisitionId: role,
+      candidateIds: [asha],
+    } as never)) as { invited: string[]; skipped: { reason: string }[] };
+    expect(out.invited).toEqual([]);
+    expect(out.skipped[0]!.reason).toMatch(/asked not to be emailed/);
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "candidate.contact_opt_out")));
+    expect(audits).toHaveLength(1);
   });
 });
 

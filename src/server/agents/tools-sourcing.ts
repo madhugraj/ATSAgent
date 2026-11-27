@@ -41,7 +41,7 @@ export function registerSourcingTools(): void {
   registerTool({
     name: "find_past_candidates",
     description:
-      "People the organisation already knows who did well for other roles (shortlisted, interviewed, held in reserve or declined an offer), consented to be contacted, are not in this role's pipeline, are not employees and were not invited for this role in the last 30 days — ranked against this role's must-haves by meaning, each with why they matched and how far they got before.",
+      "People the organisation already knows who did well for other roles (shortlisted, interviewed, held in reserve, declined an offer or turned down after an interview), consented to be contacted, did not opt out of role emails, are not in this role's pipeline, are not employees, were not invited for this role in the last 30 days and were not emailed about any role in the last 14 days — ranked against this role's must-haves by meaning, each with why they matched and how far they got before.",
     input: ReqId.extend({ limit: z.number().int().min(1).max(20).default(10) }),
     risk: "read",
     capability: "matching.pool",
@@ -56,7 +56,7 @@ export function registerSourcingTools(): void {
   registerTool({
     name: "invite_to_apply",
     description:
-      "Email up to 10 past candidates an invitation to apply for this approved role, with its public apply link (they apply themselves; nobody is added to the pipeline). Skips anyone without consent, without an email, already in the pipeline or invited for this role in the last 30 days. Leaves the organisation, so a person approves it unless the invitation template is pre-approved.",
+      "Email up to 10 past candidates an invitation to apply for this approved role, with its public apply link (they apply themselves; nobody is added to the pipeline). Skips anyone without consent, who opted out of role emails, without an email, already in the pipeline, invited for this role in the last 30 days or emailed about any role in the last 14 days. Leaves the organisation, so a person approves it unless the invitation template is pre-approved.",
     input: ReqId.extend({
       candidateIds: z.array(z.string().uuid()).min(1).max(10),
     }),
@@ -89,10 +89,11 @@ export function registerSourcingTools(): void {
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
       const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { optOutUrl } = await import("@/lib/pool-contact.server");
       const invited: string[] = [];
       for (const c of ok) {
         if (!eligible.has(c.id)) {
-          skipped.push({ id: c.id, reason: "was invited recently or is not a past candidate" });
+          skipped.push({ id: c.id, reason: "was emailed about a role recently or is not a past candidate" });
           continue;
         }
         await enqueueEmail({
@@ -108,6 +109,7 @@ export function registerSourcingTools(): void {
             jobTitle: r.title,
             location: r.location ?? undefined,
             applyUrl: applyUrl(r.id, "role_invite"),
+            optOutUrl: optOutUrl(c.id),
           },
         });
         invited.push(c.name);

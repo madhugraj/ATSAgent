@@ -702,6 +702,12 @@ export const candidates = pgTable(
     websiteUrl: text("website_url"),
     xUrl: text("x_url"),
     consentGiven: boolean("consent_given").notNull().default(true),
+    /**
+     * The person asked not to hear about roles (link in pool emails, 0097).
+     * Stops pool matching, invitations and introductions; mail about an
+     * application they are already in still goes.
+     */
+    contactOptOutAt: timestamp("contact_opt_out_at", { withTimezone: true }),
     /** The candidate asked not to be phoned by the AI assistant: no AI call dials them again. */
     aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1846,6 +1852,7 @@ export type EmailOutboxKind =
   | "member_reminder"
   | "document_request"
   | "role_invite"
+  | "pool_match_intro"
   | "interviewer_brief"
   | "interview_slots"
   | "compensation_form"
