@@ -11,6 +11,7 @@ import { z } from "zod";
 import { applications, candidates, requisitions, screeningKits, screeningRuns } from "@db/schema";
 import type { ScreeningCoverage } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { db } from "../server/db";
 import { coverageWords, notReached } from "./screening-coverage";
 
@@ -59,7 +60,7 @@ const LABEL: Record<string, string> = {
 };
 
 export const getScreeningRationale = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((d: unknown) =>
     z
       .object({ runId: z.string().uuid().optional(), applicationId: z.string().uuid().optional() })

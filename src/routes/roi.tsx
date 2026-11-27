@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { readReturnOnIndividual, type RoiView } from "@/lib/roi.functions";
 import { usePlatform } from "@/hooks/usePlatform";
 import { inr } from "@/components/ats";
@@ -22,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/roi")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Return on Individual — what the organisation got for every hire" },

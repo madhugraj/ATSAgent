@@ -18,6 +18,7 @@ import {
   socialProfiles,
 } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 type CandRow = typeof candidates.$inferSelect;
 type CandInsert = typeof candidates.$inferInsert;
@@ -69,7 +70,7 @@ function mergeCandidateFields(survivor: CandRow, dupes: CandRow[]): CandInsert {
  * same requisition are removed as true duplicates.
  */
 export const mergeCandidatesFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z
       .object({

@@ -4,10 +4,10 @@
  * A round is complete when every interviewer on it has submitted a scorecard
  * (legacy scorecards without a round count as complete for their level).
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { applications, evaluations, interviews, requisitions } from "@db/schema";
+import { applications, evaluations, interviews, panelAssessments, requisitions } from "@db/schema";
 import {
   defaultPlan,
   finalLevel,
@@ -187,6 +187,22 @@ export async function hiringDecisionBlocked(
   const p = await progressOf(orgId, applicationId);
   if (!p.rounds.some((r) => r.complete))
     return "No interview round is complete yet, so there is nothing to decide on.";
+  // A round's panel agent disagreed with the panel and the HR head has not yet
+  // reviewed it: the hiring decision waits for that review.
+  const [review] = await db
+    .select({ level: panelAssessments.level })
+    .from(panelAssessments)
+    .where(
+      and(
+        eq(panelAssessments.orgId, orgId),
+        eq(panelAssessments.applicationId, applicationId),
+        eq(panelAssessments.outcome, "disagree"),
+        isNull(panelAssessments.reviewDecision),
+      ),
+    )
+    .limit(1);
+  if (review)
+    return `On hold: the L${review.level} panel agent's view of the call disagrees with the panel and the HR head's panel review comes first. Debrief only; the hiring decision is asked for once the HR head goes with the panel.`;
   if (recommendation === "select" && !p.finalComplete) {
     const done = p.rounds.filter((r) => r.complete).map((r) => `L${r.level}`);
     return `Too early for a select: the role has ${p.finalLevel} interview round(s) and the final one (L${p.finalLevel}) is not complete (complete: ${done.join(", ") || "none"}). Debrief this round only; ask for the hiring decision after L${p.finalLevel}.`;

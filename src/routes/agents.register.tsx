@@ -47,6 +47,7 @@ const GATE_LABEL: Record<string, string> = {
   screening_decision: "Who moves on after screening",
   hiring_decision: "The hiring decision (the hiring manager decides)",
   panel_approval: "Who interviews for a round",
+  round_addition: "Another interview round",
   panel_substitute: "A stand-in for a panellist who can't make it",
   panel_review:
     "A review when its view of an interview differs from the panel's (the HR head decides)",

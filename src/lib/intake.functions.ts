@@ -12,6 +12,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { ingestCandidate, parseCv } from "./intake.server";
 
 const SaveCvInput = z.object({
@@ -27,7 +28,7 @@ const SaveCvInput = z.object({
 });
 
 export const saveCv = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => SaveCvInput.parse(data))
   .handler(async ({ data, context }) => {
     // Parse here (with the caller's org for AI routing) rather than inside

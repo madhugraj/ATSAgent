@@ -35,13 +35,16 @@ import {
   Waypoints,
 } from "lucide-react";
 
+import type { Capability } from "@/lib/capabilities";
 import type { NavCtx } from "@/hooks/useNavCtx";
 
 /**
  * Role-scoped journey. Each item carries its own visibility predicate; groups are hubs —
- * one sidebar entry each, with the hub's pages as tabs above the page. Predicates mirror — never replace — the server-side role
- * enforcement on every server function. Shared by the sidebar (AppShell) and the ⌘K
- * command palette (CommandPalette).
+ * one sidebar entry each, with the hub's pages as tabs above the page. Predicates mirror — never replace — the server-side enforcement
+ * on every server function, which now also includes the tenant workflow profile's
+ * capability set (docs/candidate-identification/track-b-design.md §1.5): a `cap`
+ * (or `anyCap`) item hides when the organisation's profile drops that capability.
+ * Shared by the sidebar (AppShell) and the ⌘K command palette (CommandPalette).
  *
  * `mode` splits the menu between the two ways of working (the top-bar switch):
  * "agent" items show in Agent mode, "manual" items in Manual mode, items without a
@@ -55,6 +58,10 @@ export type NavItem = {
   icon: typeof LayoutDashboard;
   show: (c: NavCtx) => boolean;
   mode?: WorkMode;
+  /** Capability this area needs (routeCapabilityOf's classification, §1.2). */
+  cap?: Capability;
+  /** Shared work surface: needs at least one capability rather than one specific. */
+  anyCap?: boolean;
   /** Search params for links into a tab of a page (e.g. Agent activity). */
   search?: Record<string, string>;
 };
@@ -90,16 +97,25 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/desk",
         label: "Hiring desk",
         icon: MessagesSquare,
-        show: (c) => c.inOrg,
+        show: (c) => c.inOrg && (!c.capabilities || c.capabilities.length > 0),
+        anyCap: true,
         mode: "agent",
       },
-      { to: "/agents", label: "Waiting for you", icon: Bot, show: (c) => c.inOrg, mode: "agent" },
+      {
+        to: "/agents",
+        label: "Waiting for you",
+        icon: Bot,
+        show: (c) => c.inOrg && (!c.capabilities || c.capabilities.length > 0),
+        anyCap: true,
+        mode: "agent",
+      },
       {
         to: "/agents",
         search: { tab: "activity" },
         label: "Agent activity",
         icon: Activity,
-        show: (c) => c.inOrg,
+        show: (c) => c.inOrg && (!c.capabilities || c.capabilities.length > 0),
+        anyCap: true,
         mode: "agent",
       },
     ],
@@ -163,7 +179,9 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/requisitions",
         label: "Requisitions & JD",
         icon: Briefcase,
-        show: (c) => c.inOrg,
+        show: (c) =>
+          c.inOrg && (!c.capabilities || c.capabilities.includes("pipeline.requisitions")),
+        cap: "pipeline.requisitions",
         mode: "manual",
       },
       // Matching is a hiring-team tool: recruiters run it, hiring managers and
@@ -172,28 +190,37 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/matching",
         label: "JD ↔ CV matching",
         icon: Target,
-        show: (c) => c.recruiterView || c.approver,
+        show: (c) =>
+          (c.recruiterView || c.approver) &&
+          (!c.capabilities || c.capabilities.includes("matching.pool")),
+        cap: "matching.pool",
         mode: "manual",
       },
       {
         to: "/screening",
         label: "Screening calls",
         icon: PhoneCall,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("recruiting.screening")),
+        cap: "recruiting.screening",
         mode: "manual",
       },
       {
         to: "/interviews",
         label: "Interviews",
         icon: CalendarClock,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("recruiting.interviews")),
+        cap: "recruiting.interviews",
         mode: "manual",
       },
       {
         to: "/offers",
         label: "Offers",
         icon: FileSignature,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("recruiting.offers")),
+        cap: "recruiting.offers",
         mode: "manual",
       },
     ],
@@ -206,7 +233,9 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/candidates",
         label: "Talent pool",
         icon: Users,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
+        cap: "matching.pool",
         mode: "manual",
       },
       {
@@ -220,7 +249,8 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/collaboration",
         label: "Team & sharing",
         icon: Handshake,
-        show: (c) => c.inOrg,
+        show: (c) => c.inOrg && (!c.capabilities || c.capabilities.length > 0),
+        anyCap: true,
         mode: "manual",
       },
     ],
@@ -233,7 +263,9 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/inbox",
         label: "Careers inbox",
         icon: Inbox,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("sourcing.distribution")),
+        cap: "sourcing.distribution",
         mode: "manual",
       },
       // Both ways of working: advertising a role is the same either way.
@@ -241,13 +273,18 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/distribution",
         label: "Job distribution",
         icon: Megaphone,
-        show: (c) => c.recruiterView || c.governance,
+        show: (c) =>
+          (c.recruiterView || c.governance) &&
+          (!c.capabilities || c.capabilities.includes("sourcing.distribution")),
+        cap: "sourcing.distribution",
       },
       {
         to: "/ijp",
         label: "Internal postings",
         icon: Building2,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("sourcing.distribution")),
+        cap: "sourcing.distribution",
         mode: "manual",
       },
     ],
@@ -260,20 +297,25 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/reports",
         label: "Reports",
         icon: BarChart3,
-        show: (c) => c.approver,
+        show: (c) => c.approver && (!c.capabilities || c.capabilities.includes("insights.reports")),
+        cap: "insights.reports",
         mode: "manual",
       },
       {
         to: "/hiring-cost",
         label: "Hiring cost",
         icon: Coins,
-        show: (c) => c.governance,
+        show: (c) =>
+          c.governance && (!c.capabilities || c.capabilities.includes("insights.reports")),
+        cap: "insights.reports",
       },
       {
         to: "/roi",
         label: "Return on Individual",
         icon: Gauge,
-        show: (c) => c.leadership,
+        show: (c) =>
+          c.leadership && (!c.capabilities || c.capabilities.includes("insights.reports")),
+        cap: "insights.reports",
         mode: "manual",
       },
       {

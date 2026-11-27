@@ -10,6 +10,7 @@ import {
   departmentsQuery,
   requisitionsQuery,
 } from "@/lib/data";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { applyInternally } from "@/lib/requisitions.functions";
 import { EmptyState, PageHeader, SkillPills, inr } from "@/components/ats";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/ijp")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Internal Job Postings (IJP) — Talent Acquisition" },

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CandidateCollab } from "@/components/CandidateCollab";
 import { CompensationPanel } from "@/components/CompensationPanel";
@@ -47,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/candidates/$id")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Candidate profile — match, social score & interviews" },

@@ -30,14 +30,14 @@ queue, no versions, no claims.
 
 ### 1.1 Tables and migration
 
-One migration (`0094_candidate_identity.sql`, next free number; additive and idempotent,
+One migration (`0095_candidate_identity.sql`, next free number; additive and idempotent,
 rolled by `scripts/migrate-pg.mjs`, ER diagram regenerated). New tables, all with
 `orgId uuid not null references organizations` (see 1.6 on the unassigned pool):
 
 **`candidate_identity_keys`** — the normalised strong keys, one row per key per
 candidate. Columns: `id`, `orgId`, `candidateId` (FK → candidates, cascade),
 `keyType` enum in (`email`, `phone`, `linkedin`, `github`, `file_hash`, `placeholder`,
-`external`), `keyValue` text, `sourceVersionId` (plain uuid in migration 0094 — the FK
+`external`), `keyValue` text, `sourceVersionId` (plain uuid in migration 0095 — the FK
 constraint to `candidate_cv_versions` is added by the A2 migration, so 0094 never
 references a table that does not exist yet), `createdAt`.
 Partial **unique** index on (`orgId`, `keyType`, `keyValue`) over the auto-merge key

@@ -26,13 +26,39 @@ import {
   requisitions,
 } from "@db/schema";
 import { log } from "../log";
+import { capabilitiesOf } from "@/lib/capabilities.server";
 import { agentRunScope } from "./context";
 import { loadPolicy } from "./policy";
-import { getAgent } from "./registry";
+import { agentGatedOff, getAgent } from "./registry";
 import { startRun, syncGateTasks } from "./runtime.server";
 import { activeRunFor } from "./tools";
+import { DEFERRED_DISPATCH } from "./events";
 
 const MAX_ATTEMPTS = 3;
+/** Work held for a busy agent is dropped (logged) after this long. */
+const DEFERRED_MAX_DAYS = 7;
+
+/** The agent is still busy on this candidate: try the deferred work next tick. */
+class StillBusy extends Error {}
+
+/** The agent's active runs on a subject (to tell covered work from new work). */
+async function activeRunsOn(
+  orgId: string,
+  agent: string,
+  subjectId: string,
+): Promise<{ id: string; goal: string }[]> {
+  return db
+    .select({ id: agentRuns.id, goal: agentRuns.goal })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agent as never),
+        eq(agentRuns.subjectId, subjectId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+}
 
 export type OrchestratorCounts = {
   processed: number;
@@ -76,6 +102,14 @@ export async function processAgentEvents(
         .where(eq(agentEvents.id, e.id));
       counts.processed++;
     } catch (err) {
+      if (err instanceof StillBusy) {
+        // Not a failure: the work waits for the agent's current run.
+        await db
+          .update(agentEvents)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(eq(agentEvents.id, e.id));
+        continue;
+      }
       counts.failed++;
       const attempts = e.attempts + 1;
       log.error("agent.orchestrator.event_failed", {
@@ -222,7 +256,78 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await notifyAgentOff(e.orgId, req.id, agent);
       return;
     }
-    if (await activeRunFor(e.orgId, agent, subject.id)) return;
+    // The tenant's workflow profile gates the agent off entirely (§1.2) — the
+    // same rule startRun enforces; the scheduler must not even try.
+    if (agentGatedOff(await capabilitiesOf(e.orgId), agent)) {
+      log.info("agent.orchestrator.gated", { org_id: e.orgId, agent, type: e.type });
+      return;
+    }
+    if (await activeRunFor(e.orgId, agent, subject.id)) {
+      // Work for an agent already busy on the same candidate or role (often
+      // waiting on a person for something else) is held, not dropped, and
+      // starts once that run is done. A run waiting on a person does not
+      // cover new work, so role-level work is held too — unless the active
+      // run was started for this very goal.
+      const active = await activeRunsOn(e.orgId, agent, subject.id);
+      const covered =
+        // The busy run caused this event itself (its own follow-on step).
+        active.some((r) => r.id === e.sourceRunId) ||
+        (subject.type === "requisition" && active.some((r) => r.goal.includes(goal)));
+      if (!covered && e.type !== DEFERRED_DISPATCH) {
+        // One held item per agent and candidate (or role): later work joins
+        // it, so the agent starts once with everything, not once per event.
+        const [held] = await db
+          .select({ id: agentEvents.id, payload: agentEvents.payload })
+          .from(agentEvents)
+          .where(
+            and(
+              eq(agentEvents.orgId, e.orgId),
+              eq(agentEvents.type, DEFERRED_DISPATCH),
+              eq(agentEvents.subjectId, subject.id),
+              inArray(agentEvents.status, ["pending", "processing"]),
+              sql`${agentEvents.payload} ->> 'agent' = ${agent}`,
+            ),
+          )
+          .limit(1);
+        if (held) {
+          const p = held.payload as { goal?: string; after?: string };
+          if (!(p.goal ?? "").includes(goal))
+            await db
+              .update(agentEvents)
+              .set({
+                payload: {
+                  ...p,
+                  goal: `${p.goal ?? ""}\n\nThen (latest first if they conflict): ${goal}`,
+                  after: `${p.after ?? ""},${e.type}`,
+                },
+                updatedAt: new Date(),
+              })
+              .where(eq(agentEvents.id, held.id));
+        } else {
+          const { emitAgentEvent } = await import("./events");
+          await emitAgentEvent({
+            orgId: e.orgId,
+            type: DEFERRED_DISPATCH,
+            subjectType: subject.type,
+            subjectId: subject.id,
+            actorUserId: e.actorUserId,
+            payload: { agent, goal, requisitionId: req.id, after: e.type },
+          });
+          // The role's desk thread hears why nothing happened yet.
+          const { noteHeldWork } = await import("../desk/desk.server");
+          await noteHeldWork(e.orgId, req.id, agent).catch((err) =>
+            log.warn("desk.note_held_failed", { org_id: e.orgId, error: err as Error }),
+          );
+        }
+        log.info("agent.orchestrator.dispatch_deferred", {
+          org_id: e.orgId,
+          agent,
+          type: e.type,
+        });
+      }
+      if (e.type === DEFERRED_DISPATCH) throw new StillBusy();
+      return;
+    }
     await startRun({
       orgId: e.orgId,
       agentType: agent,
@@ -234,6 +339,20 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     });
     started++;
   };
+
+  if (e.type === DEFERRED_DISPATCH) {
+    const p = e.payload as { agent?: string; goal?: string };
+    if (Date.now() - e.createdAt.getTime() > DEFERRED_MAX_DAYS * 864e5) {
+      log.warn("agent.orchestrator.deferred_expired", { org_id: e.orgId, agent: p.agent ?? "" });
+      return { started, synced };
+    }
+    if (p.agent && p.goal)
+      await dispatch(p.agent as Parameters<typeof dispatch>[0], p.goal, {
+        type: e.subjectType === "requisition" ? "requisition" : "application",
+        id: e.subjectId,
+      });
+    return { started, synced };
+  }
 
   const latestJd = async () =>
     (
@@ -313,17 +432,24 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       finalRound?: boolean;
       policy?: string;
       heldForPanelReview?: boolean;
+      /** Sent again once the HR head went with the panel after a disagreement. */
+      afterPanelReview?: { agentVerdict: string; agentRating: number | null };
     };
     // Under the "immediate" policy the round's verdict already moved the
-    // candidate: nobody is asked for a hiring decision.
+    // candidate: nobody is asked for a hiring decision. A disagreement held
+    // for the HR head's panel review asks for nothing until that review.
     const due =
+      !p.heldForPanelReview &&
       p.policy !== "immediate" &&
       (p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject");
+    const dissent = p.afterPanelReview
+      ? ` The round's panel agent disagreed (its view: ${p.afterPanelReview.agentVerdict}${p.afterPanelReview.agentRating == null ? "" : `, ${p.afterPanelReview.agentRating}/5`}); the HR head reviewed it and went with the panel — say so in the request.`
+      : "";
     await dispatch(
       "evaluation",
       `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
         due
-          ? " and ask the hiring manager for the hiring decision."
+          ? ` and ask the hiring manager for the hiring decision.${dissent}`
           : p.heldForPanelReview
             ? ". The move is on hold: the round's panel agent disagrees with the panel and the HR head reviews it. Write the debrief only — do not request a hiring decision."
             : p.policy === "immediate"
@@ -766,6 +892,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
   if (getAgent("intake")) {
     for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "intake")) continue;
       const fresh = (await db.execute(sql`
         select a.requisition_id id, count(*)::int n, string_agg(distinct a.source, ', ') sources
         from ${applications} a
@@ -812,11 +939,17 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     const { starvingRoles } = await import("./sourcing.server");
     const { matchNewCvsToRoles } = await import("./pool-match.server");
     for (const orgId of await enabledOrgs("sourcing", opts.orgId)) {
-      try {
-        await matchNewCvsToRoles(orgId);
-      } catch (err) {
-        log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+      const caps = await capabilitiesOf(orgId);
+      // Pool match writes straight into the pipeline: a tenant whose profile
+      // gates the pool capability off gets no automatic additions (§1.2).
+      if (caps.includes("matching.pool")) {
+        try {
+          await matchNewCvsToRoles(orgId);
+        } catch (err) {
+          log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+        }
       }
+      if (agentGatedOff(caps, "sourcing")) continue;
       for (const r of await starvingRoles(orgId)) {
         const principal = r.createdBy ?? (await ownerOf(orgId));
         if (!principal) continue;
@@ -836,6 +969,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   // listings, unread inbox mail and role-limited CVs past retention.
   if (getAgent("distribution")) {
     for (const orgId of await enabledOrgs("distribution", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "distribution")) continue;
       const [recent] = await db
         .select({ id: agentRuns.id })
         .from(agentRuns)
@@ -1077,6 +1211,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   }
   if (getAgent("intake")) {
     for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "intake")) continue;
       const reqs = await db
         .select({
           id: requisitions.id,

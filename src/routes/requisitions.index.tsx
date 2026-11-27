@@ -11,6 +11,7 @@ import {
   createRequisition,
   deleteRequisition,
 } from "@/lib/requisitions.functions";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { useRoles } from "@/hooks/useRoles";
 import {
   addMasterItem,
@@ -46,6 +47,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 export const Route = createFileRoute("/requisitions/")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Manpower Requisitions & JD Library — ATS" },

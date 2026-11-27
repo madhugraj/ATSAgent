@@ -32,6 +32,8 @@ import {
   type AiConfig,
 } from "@/lib/ai-gateway.server";
 import { assertRole, type AppRole } from "@/lib/auth.middleware";
+import { CAPABILITY_MESSAGE, type Capability } from "@/lib/capabilities";
+import { capabilitiesOf } from "@/lib/capabilities.server";
 import { db } from "../db";
 import { writeAudit } from "../audit";
 import { log } from "../log";
@@ -61,7 +63,7 @@ import {
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
-import { getTool, type ToolContext } from "./registry";
+import { AGENT_CAPABILITY_MESSAGE, agentGatedOff, getTool, type ToolContext } from "./registry";
 import { LIVE_RUN_STATUSES, runSubjectGone, staleReasonSql } from "./task-liveness";
 
 /**
@@ -240,6 +242,7 @@ type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects
 type PolicyFindingSubject = { type: "policy_finding"; findingId: string; expects?: string };
 type PolicyBriefingSubject = { type: "policy_briefing"; briefingId: string; expects?: string };
 type GateSubject =
+  | import("./round-gate.server").RoundAdditionSubject
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
@@ -456,6 +459,10 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     };
   }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "round_addition") {
+    const { roundGateFor } = await import("./round-gate.server");
+    return roundGateFor(orgId, subject);
+  }
   if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "new_panelist") return newPanelistGateFor(orgId, subject);
@@ -850,6 +857,10 @@ async function performGate(
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "round_addition") {
+    const { performRoundGate } = await import("./round-gate.server");
+    return performRoundGate(orgId, actor, subject, decision);
+  }
   if (subject.type === "expert_brief")
     return performExpertBriefGate(orgId, userId, subject, decision);
   if (subject.type === "panel_review") {
@@ -1216,6 +1227,13 @@ export async function startRun(input: {
         : `Unknown agent: ${input.agentType}`,
     );
   const def = resolved.def;
+  // Tenant workflow profile (§1.2): a stock agent whose every capability is
+  // gated off never starts. Studio agents (`studio:<slug>`) are not skipped
+  // here — their tools are gated per call instead.
+  if (!isStudioType(input.agentType)) {
+    const caps = await capabilitiesOf(input.orgId);
+    if (agentGatedOff(caps, input.agentType)) throw new Error(AGENT_CAPABILITY_MESSAGE);
+  }
   const definition = await ensureDefinition(def);
   let conversationId = input.conversationId ?? null;
   if (!conversationId && input.subjectId) {
@@ -1859,6 +1877,9 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       ? { ...m, name: aliasOf(m.name) }
       : m;
   const policy = await loadPolicy(run.orgId, run.agentType);
+  // The tenant's capability set for this leg (§1.2): gated tools are not
+  // offered to the model and a call to one is refused before any side effect.
+  const caps = await capabilitiesOf(run.orgId);
   const ctx: ToolContext = {
     orgId: run.orgId,
     principalUserId: run.principalUserId,
@@ -1875,7 +1896,7 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
   if (run.pending) {
     for (const p of run.pending as PendingCall[]) {
       const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, p.taskId)).limit(1);
-      const message = await applyDecision(ctx, task, p.call, seq++);
+      const message = await applyDecision(ctx, task, p.call, seq++, caps);
       transcript.push(shownAs(message));
     }
     // A person decided: the next stretch of work gets a fresh allowance.
@@ -1891,19 +1912,25 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
 
   const allowed = new Set(def.tools);
   const specs: AgentToolSpec[] = [
-    ...def.tools.flatMap((name) => {
-      const t = getTool(name);
-      const shown = def.toolAliases?.[name];
-      return t
-        ? [
-            {
-              name: shown?.name ?? name,
-              description: shown?.description ?? t.description,
-              parameters: toolParameters(t.input),
-            },
-          ]
-        : [];
-    }),
+    ...def.tools
+      // Tools the organisation's profile gates off are not offered at all.
+      .filter((name) => {
+        const t = getTool(name);
+        return !t?.capability || caps.includes(t.capability);
+      })
+      .flatMap((name) => {
+        const t = getTool(name);
+        const shown = def.toolAliases?.[name];
+        return t
+          ? [
+              {
+                name: shown?.name ?? name,
+                description: shown?.description ?? t.description,
+                parameters: toolParameters(t.input),
+              },
+            ]
+          : [];
+      }),
     ...(Object.keys(HITL_TOOLS) as HitlName[]).map((name) => ({
       name,
       description: HITL_TOOLS[name].description,
@@ -2062,7 +2089,7 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     const pending: PendingCall[] = [];
     for (const shownCall of res.toolCalls) {
       const call = { ...shownCall, name: toReal.get(shownCall.name) ?? shownCall.name };
-      const outcome = await handleCall(run, ctx, policy, allowed, call, seq++);
+      const outcome = await handleCall(run, ctx, policy, allowed, caps, call, seq++);
       if (outcome.kind === "message") transcript.push(shownAs(outcome.message));
       else if (outcome.kind === "pending") pending.push({ taskId: outcome.taskId, call });
       else {
@@ -2108,6 +2135,7 @@ async function handleCall(
   ctx: ToolContext,
   policy: Awaited<ReturnType<typeof loadPolicy>>,
   allowed: Set<string>,
+  caps: Capability[],
   call: AgentToolCall,
   seq: number,
 ): Promise<CallOutcome> {
@@ -2179,6 +2207,10 @@ async function handleCall(
 
   const tool = allowed.has(call.name) ? getTool(call.name) : undefined;
   if (!tool) return toolError(`Unknown tool: ${call.name}`);
+  // The profile may have changed since the leg's specs were built (or the model
+  // may have guessed a hidden tool): refuse before anything runs or opens.
+  if (tool.capability && !caps.includes(tool.capability))
+    return toolError(CAPABILITY_MESSAGE, true);
   const parsed = tool.input.safeParse(call.args);
   if (!parsed.success) return toolError(`Invalid arguments: ${parsed.error.message}`);
 
@@ -2244,7 +2276,7 @@ async function handleCall(
   const notify = tool.risk !== "read" && policy.autonomy === "act_and_notify";
   return {
     kind: "message",
-    message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify),
+    message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify, caps),
   };
 }
 
@@ -2425,8 +2457,22 @@ async function execute(
   args: unknown,
   seq: number,
   notify = false,
+  caps: Capability[] = [],
 ): Promise<AgentMessage> {
   const tool = getTool(name)!;
+  // Last guard before any side effect: the capability may have been gated off
+  // while this call waited for a person's approval.
+  if (tool.capability && !caps.includes(tool.capability)) {
+    await recordStep(run, seq, {
+      kind: "tool",
+      toolName: name,
+      toolCallId: call.id,
+      status: "error",
+      input: redactArgs(args),
+      output: { error: CAPABILITY_MESSAGE, refused: true },
+    });
+    return { role: "tool", toolCallId: call.id, name, content: CAPABILITY_MESSAGE, isError: true };
+  }
   const started = Date.now();
   try {
     // A tool working on one candidate / role: its AI calls count towards them.
@@ -2513,6 +2559,7 @@ async function applyDecision(
   task: typeof agentTasks.$inferSelect | undefined,
   call: AgentToolCall,
   seq: number,
+  caps: Capability[] = [],
 ): Promise<AgentMessage> {
   const reply = (content: string, isError = false): AgentMessage => ({
     role: "tool",
@@ -2570,11 +2617,18 @@ async function applyDecision(
       return told(`${await approvedPanelWords(task.orgId, subject)}${comment}`);
     if (subject?.type === "new_panelist")
       return told(`${await newPanelistWords(task.orgId, task.id)}${comment}`);
+    if (subject?.type === "round_addition") {
+      const { roundAddedWords } = await import("./round-gate.server");
+      return told(`${await roundAddedWords(task.orgId, subject)}${comment}`);
+    }
     return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.
   const tool = getTool(call.name);
   if (!tool || !run) return reply(`Unknown tool: ${call.name}`, true);
+  // The capability may have been gated off while the person was deciding:
+  // nothing runs, and the trail shows why.
+  if (tool.capability && !caps.includes(tool.capability)) return told(CAPABILITY_MESSAGE, true);
   const edited = response["args"] !== undefined ? response["args"] : call.args;
   const parsed = tool.input.safeParse(edited);
   if (!parsed.success)
@@ -2583,7 +2637,7 @@ async function applyDecision(
   // (their own permissions apply and the audit names them).
   const asApprover =
     tool.approverRole && task.decidedBy ? { ...ctx, principalUserId: task.decidedBy } : ctx;
-  return execute(run, asApprover, tool.name, call, parsed.data, seq);
+  return execute(run, asApprover, tool.name, call, parsed.data, seq, false, caps);
 }
 
 async function openTask(
@@ -2906,6 +2960,30 @@ export async function cancelStaleRequests(
     )
     .returning({ id: agentTasks.id, runId: agentTasks.runId });
   closed.push(...decisions);
+  // A stand-in proposed for the round the candidate has just left: that round is over.
+  const standIns = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      response: {
+        status: "cancelled",
+        reason: `the candidate moved from ${fromStage} to ${toStage}, so a stand-in for that round no longer applies.`,
+      } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'panel_substitute'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+        sql`'l' || (${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level') = ${fromStage}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  closed.push(...standIns);
   for (const t of closed) {
     await writeAudit({
       actor: "system:stage-change",
@@ -2918,6 +2996,35 @@ export async function cancelStaleRequests(
     await requeueIfUnblocked(t.runId);
   }
   return closed.length;
+}
+
+/**
+ * A round that will not happen (called off, missed): its open stand-in
+ * requests no longer apply — closed, so the Interview coordinator can offer
+ * new times instead of waiting on them.
+ */
+export async function closeRoundRequests(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<number> {
+  const open = await db
+    .select({ id: agentTasks.id, runId: agentTasks.runId, orgId: agentTasks.orgId })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'panel_substitute'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+        sql`(${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level')::int = ${level}`,
+      ),
+    );
+  return closeTasks(
+    open as TaskRef[],
+    `The L${level} interview will not go ahead as booked; new times are being offered.`,
+    "system:round-missed",
+  );
 }
 
 /* ------------------------------------- requests that outlived their work */

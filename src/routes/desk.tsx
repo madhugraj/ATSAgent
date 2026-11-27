@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { RECENT_MESSAGES, SCREENABLE, foldText, supersededMessages } from "@/lib/desk-view";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { ScreeningResultSummary, WhyThisScore } from "@/components/ScreeningRationale";
@@ -46,6 +47,7 @@ import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -97,6 +99,7 @@ import {
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
+  beforeLoad: requireRouteCapability,
   validateSearch: z.object({
     c: z.string().optional(),
     split: z.string().optional(),
@@ -2222,6 +2225,7 @@ function RankedCard({
 const TASK_STATUS: Record<string, string> = {
   open: "Waiting for you",
   approved: "Approved",
+  approved_failed: "Approved — failed",
   rejected: "Declined",
   changes_requested: "Changes requested",
   stale: "No longer applies — the candidate moved on",
@@ -2255,6 +2259,8 @@ function TaskCard({
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
   // Someone new for the panel directory: HR types them in and approves in one step.
   const newPanelist = kind === "gate" && card["subjectType"] === "new_panelist";
+  // Another interview round the agent drafted: the hiring manager edits it, then approves.
+  const extraRound = kind === "gate" && card["subjectType"] === "round_addition";
   const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
   // One decision at a time: a role-level request waits while a newer open
@@ -2313,7 +2319,12 @@ function TaskCard({
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-medium">{String(card["title"])}</p>
-        <Badge variant={status === "open" ? "default" : "outline"} className="ml-auto">
+        <Badge
+          variant={
+            status === "open" ? "default" : status === "approved_failed" ? "destructive" : "outline"
+          }
+          className="ml-auto"
+        >
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
@@ -2511,6 +2522,13 @@ function TaskCard({
             onSave={(panelist) => decide({ status: "approved", args: { panelist } })}
             onDecline={() => setDeclining(true)}
           />
+        ) : changing && extraRound ? (
+          <ExtraRoundEdit
+            proposed={card["round"] as ExtraRoundDraft}
+            busy={busy}
+            onSave={(round) => decide({ status: "approved", args: { round } })}
+            onBack={() => setChanging(false)}
+          />
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
@@ -2529,22 +2547,24 @@ function TaskCard({
             >
               {panel
                 ? "Approve this panel"
-                : review
-                  ? "Approve — go with the panel"
-                  : screening
-                    ? proceed
-                      ? "Approve — move to interview (L1)"
-                      : "Approve — put on hold"
-                    : "Approve"}
+                : extraRound
+                  ? "Approve — add this round"
+                  : review
+                    ? "Approve — go with the panel"
+                    : screening
+                      ? proceed
+                        ? "Approve — move to interview (L1)"
+                        : "Approve — put on hold"
+                      : "Approve"}
             </Button>
-            {panel ? (
+            {panel || extraRound ? (
               <Button
                 size="sm"
                 variant="outline"
                 disabled={busy || locked}
                 onClick={() => setChanging(true)}
               >
-                Change the people
+                {extraRound ? "Edit the round" : "Change the people"}
               </Button>
             ) : null}
             {screening ? (
@@ -2795,6 +2815,85 @@ const BOARD_TONE: Record<BoardRow["tone"], string> = {
   stopped: "text-muted-foreground",
 };
 
+type InterviewRow = NonNullable<DeskConversationView["progress"]["interviews"]>[number];
+
+/** Each candidate's rounds in order, the hand-overs between them, and who has them now. */
+function InterviewBoard({ rows }: { rows: InterviewRow[] }) {
+  const waiting = rows.filter((r) => r.now.tone === "decide").length;
+  return (
+    <div
+      className="mt-1.5 rounded-md border border-border p-2 text-xs"
+      aria-label="Interview board"
+    >
+      <p className="mb-1 flex items-center justify-between font-medium">
+        <span>
+          {rows.length} {rows.length === 1 ? "candidate" : "candidates"} in interviews
+        </span>
+        {waiting ? <span className="text-primary">{waiting} waiting for you</span> : null}
+      </p>
+      <ul className="divide-y divide-border">
+        {rows.map((r) => (
+          <li key={r.applicationId} className="py-1.5">
+            <p className="truncate font-medium">{r.name}</p>
+            {r.now.taskId ? (
+              <button
+                type="button"
+                className={`text-left underline ${BOARD_TONE[r.now.tone]}`}
+                onClick={() =>
+                  document
+                    .querySelector(`[data-open-task="${r.now.taskId}"]`)
+                    ?.scrollIntoView({ block: "center", behavior: "smooth" })
+                }
+              >
+                Now: {r.now.text}
+              </button>
+            ) : (
+              <p className={BOARD_TONE[r.now.tone]}>Now: {r.now.text}</p>
+            )}
+            <ol className="mt-1 space-y-0.5">
+              {r.steps.map((st, i) => (
+                <li key={i} className="flex gap-1.5">
+                  {st.state === "done" ? (
+                    <CheckCircle2
+                      className="mt-0.5 size-3 shrink-0 text-primary"
+                      aria-label="done"
+                    />
+                  ) : st.state === "current" ? (
+                    <CircleDot className="mt-0.5 size-3 shrink-0 text-primary" aria-label="now" />
+                  ) : (
+                    <Circle
+                      className="mt-0.5 size-3 shrink-0 text-muted-foreground/40"
+                      aria-label={st.state === "stopped" ? "stopped" : "to come"}
+                    />
+                  )}
+                  <span className="min-w-0">
+                    <span
+                      className={
+                        st.state === "current"
+                          ? "font-medium"
+                          : st.state === "done"
+                            ? ""
+                            : "text-muted-foreground"
+                      }
+                    >
+                      {st.text}
+                    </span>
+                    {st.sub ? (
+                      <span className="block whitespace-pre-line text-muted-foreground">
+                        {st.sub}
+                      </span>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Everyone in screening for this role at a glance: where they are, the score, what waits. */
 function ScreeningBoard({ rows }: { rows: BoardRow[] }) {
   const waiting = rows.filter((r) => r.tone === "decide").length;
@@ -3001,6 +3100,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                 ) : null}
                 {s.key === "screening" && p.screening?.length ? (
                   <ScreeningBoard rows={p.screening} />
+                ) : null}
+                {s.key === "interviews" && p.interviews?.length ? (
+                  <InterviewBoard rows={p.interviews} />
                 ) : null}
               </div>
             </li>
@@ -3984,6 +4086,63 @@ function RescoreCard({
         {busy ? <Loader2 className="size-4 animate-spin" /> : null}
         Re-score {String(card["count"])} against version {String(card["version"])}
       </Button>
+    </div>
+  );
+}
+
+type ExtraRoundDraft = { name: string; focus: string; competencies: string[] };
+
+/** The drafted round, edited in place before the hiring manager approves it. */
+function ExtraRoundEdit({
+  proposed,
+  busy,
+  onSave,
+  onBack,
+}: {
+  proposed: ExtraRoundDraft;
+  busy: boolean;
+  onSave: (round: ExtraRoundDraft) => void;
+  onBack: () => void;
+}) {
+  const [name, setName] = useState(proposed.name);
+  const [focus, setFocus] = useState(proposed.focus);
+  const [rates, setRates] = useState(proposed.competencies.join("\n"));
+  const competencies = rates
+    .split(/\n|,/)
+    .map((c) => c.trim())
+    .filter((c) => c.length >= 2);
+  const ok = name.trim().length >= 2 && competencies.length >= 1 && competencies.length <= 8;
+  return (
+    <div className="mt-2 grid gap-2 text-xs">
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Round name</span>
+        <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Focus</span>
+        <Textarea
+          value={focus}
+          maxLength={300}
+          rows={2}
+          onChange={(e) => setFocus(e.target.value)}
+        />
+      </label>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Rated on</span>
+        <Textarea value={rates} rows={4} onChange={(e) => setRates(e.target.value)} />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          disabled={busy || !ok}
+          onClick={() => onSave({ name: name.trim(), focus: focus.trim(), competencies })}
+        >
+          Approve — add this round
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onBack}>
+          Back
+        </Button>
+      </div>
     </div>
   );
 }

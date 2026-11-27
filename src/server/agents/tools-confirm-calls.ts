@@ -157,6 +157,7 @@ export function registerConfirmCallTools(): void {
       description: CONFIRMATION_TOOL_DESCRIPTIONS[name],
       input: CONFIRMATION_TOOL_INPUTS[name] as z.ZodType<Record<string, unknown>>,
       risk: "write",
+      capability: "recruiting.interviews",
       describe: () => `On the call: ${name.replace(/_/g, " ")}`,
       run: async (ctx, i) => confirmationTool(ctx, name, i),
     });
@@ -167,6 +168,7 @@ export function registerConfirmCallTools(): void {
         description: PANEL_TOOL_DESCRIPTIONS[name],
         input: PANEL_TOOL_INPUTS[name] as z.ZodType<Record<string, unknown>>,
         risk: "write",
+        capability: "recruiting.interviews",
         describe: () => `On the call: ${name.replace(/_/g, " ")}`,
         run: async (ctx, i) => panelTool(ctx, name, i),
       });

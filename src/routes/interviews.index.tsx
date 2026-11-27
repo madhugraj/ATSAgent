@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { ConfirmLine } from "@/components/interviews/ConfirmLine";
 import { overdueScorecards, roundConfirmations } from "@/lib/interview-confirmations.functions";
 import { useServerFn } from "@tanstack/react-start";
@@ -43,6 +44,7 @@ import {
 } from "@/components/ui/select";
 
 export const Route = createFileRoute("/interviews/")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Interviews & 3-Level Evaluations — ATS" },

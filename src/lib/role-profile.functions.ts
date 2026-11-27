@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { draftRoleProfile, type RoleProfile } from "./role-profile.server";
 
 export type { RoleProfile } from "./role-profile.server";
@@ -17,7 +18,7 @@ const Input = z.object({
 
 /** Draft skills, qualifications and responsibilities for a role title. */
 export const suggestRoleProfile = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) => Input.parse(data))
   .handler(async ({ data, context }): Promise<RoleProfile> =>
     draftRoleProfile({ ...data, orgId: context.orgId }),

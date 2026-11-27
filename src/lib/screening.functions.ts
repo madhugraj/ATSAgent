@@ -15,6 +15,7 @@ import {
 } from "@db/schema";
 import { getObject, putObject } from "../server/storage";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import {
   buildScreeningKit,
   gradeScreening,
@@ -346,7 +347,7 @@ export const gradeScreeningForKit = createServerOnlyFn(async function gradeScree
 });
 
 export const createScreeningKit = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) =>
     z
       .object({
@@ -367,7 +368,7 @@ export const createScreeningKit = createServerFn({ method: "POST" })
 /* ------------------------------------------------------------- edit a kit */
 
 export const saveScreeningKit = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) =>
     z
       .object({
@@ -389,7 +390,7 @@ export const saveScreeningKit = createServerFn({ method: "POST" })
 /* ---------------------------------------------------------- grade answers */
 
 export const gradeScreeningAnswers = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) =>
     z
       .object({
@@ -483,7 +484,7 @@ export const gradeScreeningAnswers = createServerFn({ method: "POST" })
  * private vault after the caller's org is verified — no signed storage URLs.
  */
 export const getScreeningAudioUrl = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) => z.object({ runId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [run] = await db

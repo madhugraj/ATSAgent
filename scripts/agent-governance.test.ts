@@ -65,6 +65,7 @@ const { registerOrgTools } = await import("../src/server/agents/tools-org");
 const { registerLabourTools } = await import("../src/server/agents/tools-labour");
 const { registerExpertTools } = await import("../src/server/agents/tools-expert");
 const { registerPanelTools } = await import("../src/server/agents/tools-panel");
+const { registerRoundTools } = await import("../src/server/agents/round-gate.server");
 const { registerOntologyTools } = await import("../src/server/agents/tools-ontology");
 const { registerVoiceGuardTools } = await import("../src/server/agents/tools-voice-guard");
 const {
@@ -183,6 +184,7 @@ describe("change control", () => {
     registerLabourTools();
     registerExpertTools();
     registerPanelTools();
+    registerRoundTools();
     registerOntologyTools();
     registerVoiceGuardTools();
     registerPhase1Agents();
