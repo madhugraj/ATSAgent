@@ -5,6 +5,8 @@
  * undone; nothing merges automatically.
  */
 import { createFileRoute } from "@tanstack/react-router";
+
+import { requireRouteCapability } from "@/lib/route-guard";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,6 +26,7 @@ import {
 import { withStepUp } from "@/lib/step-up-client";
 
 export const Route = createFileRoute("/candidates/merge-review")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Merge review — ATSIQ" },

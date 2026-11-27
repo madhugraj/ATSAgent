@@ -12,6 +12,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { candidateIdentitySettings, candidateMergeSuggestions, candidates } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import {
   assertMergeDecisionRole,
   decideSuggestion,
@@ -90,7 +91,7 @@ function toView(row: CandidateViewRow): MergeCandidateView {
 
 /** The review queue: pending pairs first, then the recently decided for context. */
 export const listMergeSuggestionsFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .handler(
     async ({
       context,
@@ -147,7 +148,7 @@ export const listMergeSuggestionsFn = createServerFn({ method: "POST" })
   );
 
 export const decideMergeSuggestionFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z
       .object({
@@ -177,7 +178,7 @@ export const decideMergeSuggestionFn = createServerFn({ method: "POST" })
   });
 
 export const undoMergeFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z.object({ mergeId: z.string().uuid(), note: z.string().max(2000).nullish() }).parse(data),
   )
@@ -195,12 +196,12 @@ export const undoMergeFn = createServerFn({ method: "POST" })
   });
 
 export const getIdentitySettingsFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .handler(async ({ context }): Promise<IdentitySettings> => getIdentitySettings(context.orgId));
 
 /** Identity thresholds change destructive behaviour — HR leadership only, audited. */
 export const updateIdentitySettingsFn = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z
       .object({

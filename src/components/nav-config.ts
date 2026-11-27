@@ -242,7 +242,9 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/candidates/merge-review",
         label: "Merge review",
         icon: GitMerge,
-        show: (c) => c.recruiterView,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
+        cap: "matching.pool",
         mode: "manual",
       },
       {
