@@ -14,7 +14,7 @@ create table if not exists profile_match_scores (
   coarse_score numeric(6,3) not null default 0,
   coarse_rank integer,
   overall_score integer,
-  stage text not null default 'coarse',
+  review_stage text not null default 'coarse',
   factors jsonb not null default '[]'::jsonb,
   requirements jsonb not null default '[]'::jsonb,
   knockouts jsonb not null default '[]'::jsonb,
@@ -26,7 +26,7 @@ create table if not exists profile_match_scores (
   decision_note text,
   judged_at timestamptz,
   computed_at timestamptz not null default now(),
-  constraint profile_match_scores_stage_check check (stage in ('coarse','judged')),
+  constraint profile_match_scores_stage_check check (review_stage in ('coarse','judged')),
   constraint profile_match_scores_decision_check
     check (decision is null or decision in ('shortlisted','rejected'))
 );
