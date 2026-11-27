@@ -245,6 +245,28 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
       }
     }
 
+    // The CV is kept as a version. When it matched someone already on file it
+    // stays pending (outside their profile) until a recruiter accepts it —
+    // unauthenticated input never changes an existing person (M0 verdict).
+    if (r.orgId) {
+      const matchedExisting =
+        outcome.outcome === "merged" || outcome.outcome === "attach" || Boolean(legacy);
+      try {
+        const { recordCvVersion } = await import("../server/candidates/versions.server");
+        await recordCvVersion({
+          orgId: r.orgId,
+          candidateId,
+          requisitionId: r.id,
+          source: "apply",
+          fileName: data.fileName,
+          parsedText: data.resumeText,
+          accepted: !matchedExisting,
+        });
+      } catch (e) {
+        console.error("[apply] could not record the CV version:", e);
+      }
+    }
+
     const [app] = await db
       .select({ id: applications.id })
       .from(applications)

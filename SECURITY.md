@@ -439,3 +439,14 @@ schema; any instruction-like content is reported to the reviewer rather than
 acted upon. Upload, validation and rejection decisions are written to the audit
 log with the acting user, and offer release is refused server-side until every
 mandatory document type has been validated.
+
+## CV versions and claims (Candidate Identification A2)
+
+- CV text reaches the claims prompt only through `untrusted()` with `INJECTION_RULES`;
+  the model's JSON is zod-validated, and a claim is stored only when its quoted passage
+  actually occurs in the CV (no invented evidence).
+- A CV submitted on the public apply page that matches an existing person is stored as a
+  pending version and never enters that person's profile until a recruiter accepts it.
+- Merges keep the stricter of the two records' pool-use, consent and AI-call opt-out.
+- Erasure deletes every stored CV version file, every claim, and any record merged into
+  the erased person (tombstones), so no copy of their CV survives.

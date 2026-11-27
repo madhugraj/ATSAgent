@@ -138,6 +138,8 @@ export async function storeResumeFile(input: {
   candidateId: string;
   filename: string;
   bytes: Uint8Array;
+  /** sha256 of the bytes: keeps each distinct CV version as its own object. */
+  contentHash?: string | null;
 }): Promise<{ path: string | null; error: string | null }> {
   if (!input.orgId || input.bytes.byteLength === 0) {
     return {
@@ -148,7 +150,10 @@ export async function storeResumeFile(input: {
     };
   }
   try {
-    const path = resumeObjectPath(input.orgId, input.candidateId, input.filename);
+    const name = input.contentHash
+      ? `${input.contentHash.slice(0, 12)}-${input.filename}`
+      : input.filename;
+    const path = resumeObjectPath(input.orgId, input.candidateId, name);
     await putObject(
       path,
       Uint8Array.from(input.bytes),
@@ -589,15 +594,37 @@ async function ingestCandidateInner(input: {
 
   let resumeStored = false;
   let resumeError: string | null = null;
+  let storedPath: string | null = null;
   if (input.resumeFile?.bytes?.length) {
     const stored = await storeResumeFile({
       orgId: input.orgId,
       candidateId: result.candidateId,
       filename: input.resumeFile.filename,
       bytes: input.resumeFile.bytes,
+      contentHash: fileHash,
     });
     resumeStored = Boolean(stored.path);
     resumeError = stored.error;
+    storedPath = stored.path;
+  }
+
+  // Every CV is a version (design §2): history is kept, claims are queued.
+  if (input.orgId && !input.profileOnly && (input.resumeText ?? "").trim()) {
+    try {
+      const { recordCvVersion } = await import("../server/candidates/versions.server");
+      await recordCvVersion({
+        orgId: input.orgId,
+        candidateId: result.candidateId,
+        requisitionId: input.requisitionId,
+        source: input.source,
+        fileHash,
+        filePath: storedPath,
+        fileName: input.resumeFile?.filename ?? input.fileName ?? null,
+        parsedText: input.resumeText,
+      });
+    } catch (e) {
+      console.error("[intake] could not record the CV version:", e);
+    }
   }
 
   return {

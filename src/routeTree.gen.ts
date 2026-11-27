@@ -77,6 +77,7 @@ import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
 import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agent-tick'
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
+import { Route as ApiPublicCvProcessingRouteImport } from './routes/api/public/cv-processing'
 import { Route as ApiPublicDistributionRouteImport } from './routes/api/public/distribution'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
 import { Route as ApiPublicInboxSyncRouteImport } from './routes/api/public/inbox-sync'
@@ -431,6 +432,11 @@ const ApiPublicCaptureRoute = ApiPublicCaptureRouteImport.update({
   path: '/api/public/capture',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCvProcessingRoute = ApiPublicCvProcessingRouteImport.update({
+  id: '/api/public/cv-processing',
+  path: '/api/public/cv-processing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicDistributionRoute = ApiPublicDistributionRouteImport.update({
   id: '/api/public/distribution',
   path: '/api/public/distribution',
@@ -573,6 +579,7 @@ export interface FileRoutesByFullPath {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -656,6 +663,7 @@ export interface FileRoutesByTo {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -740,6 +748,7 @@ export interface FileRoutesById {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -825,6 +834,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -908,6 +918,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -991,6 +1002,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -1075,6 +1087,7 @@ export interface RootRouteChildren {
   ApiPublicAgentTickRoute: typeof ApiPublicAgentTickRoute
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
+  ApiPublicCvProcessingRoute: typeof ApiPublicCvProcessingRoute
   ApiPublicDistributionRoute: typeof ApiPublicDistributionRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
   ApiPublicInboxSyncRoute: typeof ApiPublicInboxSyncRoute
@@ -1568,6 +1581,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCaptureRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/cv-processing': {
+      id: '/api/public/cv-processing'
+      path: '/api/public/cv-processing'
+      fullPath: '/api/public/cv-processing'
+      preLoaderRoute: typeof ApiPublicCvProcessingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/distribution': {
       id: '/api/public/distribution'
       path: '/api/public/distribution'
@@ -1731,6 +1751,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAgentTickRoute: ApiPublicAgentTickRoute,
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
+  ApiPublicCvProcessingRoute: ApiPublicCvProcessingRoute,
   ApiPublicDistributionRoute: ApiPublicDistributionRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,
   ApiPublicInboxSyncRoute: ApiPublicInboxSyncRoute,
