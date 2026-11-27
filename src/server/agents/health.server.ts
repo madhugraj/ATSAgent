@@ -76,6 +76,8 @@ export const HEALTH = {
   panelChangesPerPerson: 3,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
+  /** Panel no-shows (a panellist missed a booked round without notice) in 7 days. */
+  panelNoShows7d: 1,
   /** An open offer on its this-many-th revision is going back and forth. */
   offerRevisions: 3,
   /** A pay discussion waiting on a person (suggested figure, call asked for) this many days. */
@@ -802,6 +804,28 @@ export const RULES: Rule[] = [
           agentType: "interview",
           title: `${n} interview rounds in 7 days where the candidate did not join`,
           detail: { noShows: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_no_shows",
+    element: "hitl",
+    severity: "critical",
+    description: `A panellist did not join a booked interview round and gave no notice (${HEALTH.panelNoShows7d} or more in 7 days). The candidate was left waiting; each panellist was warned and the HR head told, and the Interview coordinator proposes a stand-in — approve it on the hiring desk so the candidate is not lost, and speak to anyone who misses again.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; people: number }>(sql`
+        select count(*)::int n, count(distinct lower(detail ->> 'email'))::int people
+        from audit_log
+        where org_id = ${orgId} and action = 'interview.panel_no_show'
+          and created_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x?.n || x.n < HEALTH.panelNoShows7d) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.n} panel no-show(s) in 7 days`,
+          detail: { noShows: x.n, panellists: x.people },
         },
       ];
     },

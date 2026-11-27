@@ -508,10 +508,17 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   }
 
   if (e.type === "interview.missed" && applicationId) {
-    const p = e.payload as { level?: number; outcome?: string };
+    const p = e.payload as {
+      level?: number;
+      outcome?: string;
+      noShows?: { memberId: string | null; name: string }[];
+    };
+    const noShows = p.noShows ?? [];
     await dispatch(
       "interview",
-      `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen (${(p.outcome ?? "").replace(/_/g, " ")}). Offer new times for that round.`,
+      noShows.length
+        ? `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen: panel no-show — ${noShows.map((m) => `${m.name}${m.memberId ? ` (memberId ${m.memberId})` : ""}`).join(", ")} did not join and gave no notice. The candidate must not be lost: for each of them, list_substitutes and propose_substitute (the round is no longer booked, so any eligible person will do). Once you are told a stand-in is approved, offer new times with the candidate's panel. Never offer times that include anyone who missed. If no stand-in exists or one is declined, handoff with the reason.`
+        : `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen (${(p.outcome ?? "").replace(/_/g, " ")}). Offer new times for that round.`,
       { type: "application", id: applicationId },
     );
   }

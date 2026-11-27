@@ -93,6 +93,8 @@ export type MyInterview = {
   anchors: Record<string, { low: string; mid: string; high: string }>;
   /** Everyone on the panel (names or emails). */
   panel: string[];
+  /** Everyone on the panel with their address; `me` is the signed-in interviewer. */
+  panel_people: { name: string; email: string; me: boolean }[];
   /** Panel members who have not scored yet (when I have). */
   waiting_for: string[];
   /** I said I cannot make this booked round (a stand-in is being arranged). */
@@ -225,6 +227,11 @@ export const myInterviews = createServerFn({ method: "GET" })
         weights: round?.weights ?? {},
         anchors: round?.anchors ?? {},
         panel: members.map((m) => m.name ?? m.email),
+        panel_people: members.map((m) => ({
+          name: m.name ?? m.email,
+          email: m.email.toLowerCase(),
+          me: m.email.toLowerCase() === email,
+        })),
         waiting_for: members
           .filter((m) => !by.includes(m.email.toLowerCase()))
           .map((m) => m.name ?? m.email),
@@ -656,6 +663,8 @@ const OutcomeInput = z.object({
   interviewId: z.string().uuid(),
   outcome: z.enum(["candidate_no_show", "interviewer_unavailable", "cancelled"]),
   note: z.string().trim().max(500).default(""),
+  /** Interviewer unavailable: who on the round did not join (addresses on the round). */
+  missed: z.array(z.string().trim().toLowerCase().email()).max(20).optional(),
 });
 
 /**
@@ -697,10 +706,22 @@ export const markInterviewOutcomeCore = createServerOnlyFn(async function markIn
       ["recruiter", "hiring_manager", "hr_head", "president_cbo"],
       "Only an interviewer on this round or the hiring team can mark it.",
     );
-  await recordMissedRound(ctx.orgId, r, data.outcome, data.note, {
-    email: ctx.email,
-    userId: ctx.userId,
-  });
+  let missed: string[] | undefined;
+  if (data.outcome === "interviewer_unavailable" && data.missed) {
+    const onRound = new Set(emailsOf(r).map((e) => e.toLowerCase()));
+    if (!data.missed.length) throw new Error("Pick who did not join.");
+    if (data.missed.some((e) => !onRound.has(e)))
+      throw new Error("Only people on this round can be marked as not joining.");
+    missed = [...new Set(data.missed)];
+  }
+  await recordMissedRound(
+    ctx.orgId,
+    r,
+    data.outcome,
+    data.note,
+    { email: ctx.email, userId: ctx.userId },
+    missed,
+  );
   return { ok: true };
 });
 
@@ -722,6 +743,8 @@ export async function recordMissedRound(
   outcome: "candidate_no_show" | "interviewer_unavailable" | "cancelled",
   note: string,
   actor: { email: string; userId: string | null },
+  /** Who on the round did not join, when the person marking it said so. */
+  missedEmails?: string[],
 ): Promise<void> {
   const status = outcome === "candidate_no_show" ? "no_show" : "cancelled";
   const label =
@@ -747,6 +770,14 @@ export async function recordMissedRound(
   if (outcome !== "candidate_no_show") await apologiseToCandidate(orgId, r);
   const { closeRoundRequests } = await import("../server/agents/runtime.server");
   await closeRoundRequests(orgId, r.applicationId, r.level);
+  // A panellist who did not join and gave no notice: warned, escalated to the
+  // HR heads, and replaced by a stand-in before new times go to the candidate.
+  const missed =
+    outcome === "interviewer_unavailable"
+      ? await (
+          await import("./panel-no-show.server")
+        ).handlePanelNoShow(orgId, r, actor.email, actor, missedEmails)
+      : [];
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
     orgId,
@@ -754,7 +785,14 @@ export async function recordMissedRound(
     subjectType: "application",
     subjectId: r.applicationId,
     actorUserId: actor.userId,
-    payload: { requisitionId: r.requisitionId, level: r.level, outcome },
+    payload: {
+      requisitionId: r.requisitionId,
+      level: r.level,
+      outcome,
+      ...(missed.length
+        ? { noShows: missed.map((m) => ({ memberId: m.memberId, name: m.name })) }
+        : {}),
+    },
   });
   try {
     const desk = await import("../server/desk/desk.server");
@@ -762,7 +800,7 @@ export async function recordMissedRound(
     if (conv)
       await desk.postMessage(conv, {
         role: "desk",
-        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${note ? ` ("${note}")` : ""}.${outcome === "candidate_no_show" ? "" : " The candidate was told, with an apology."} Nothing about the candidate changed; the Interview coordinator offers new times when it is on.`,
+        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${note ? ` ("${note}")` : ""}.${outcome === "candidate_no_show" ? "" : " The candidate was told, with an apology."}${missed.length ? ` Panel no-show: ${missed.map((m) => m.name).join(", ")} did not join and gave no notice — each was warned and the HR head was told. The Interview coordinator proposes a stand-in for each before offering new times.` : " Nothing about the candidate changed; the Interview coordinator offers new times when it is on."}`,
       });
   } catch {
     /* the thread is a courtesy; the audit trail has the record */
