@@ -119,6 +119,7 @@ export type RouteCapabilityRule = {
 
 export const ROUTE_CAPABILITIES: RouteCapabilityRule[] = [
   { prefix: "/requisitions", capability: "pipeline.requisitions" },
+  { prefix: "/jd-import", capability: "pipeline.requisitions" },
   { prefix: "/matching", capability: "matching.pool" },
   { prefix: "/screening", capability: "recruiting.screening" },
   { prefix: "/interviews", capability: "recruiting.interviews" },
@@ -306,6 +307,7 @@ export const TOOL_EXEMPT: ReadonlySet<string> = new Set([
 export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
   // Pipeline — requisitions & JD.
   "requisitions.functions.ts": "pipeline.requisitions",
+  "jd-import.functions.ts": "pipeline.requisitions",
   "lifecycle.functions.ts": "pipeline.requisitions",
   "role-hiring-manager.functions.ts": "pipeline.requisitions",
   "role-profile.functions.ts": "pipeline.requisitions",

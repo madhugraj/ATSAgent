@@ -412,6 +412,20 @@ rate-limited per caller and per key in `src/server.ts`. A key acts as the person
 revoked, once the workflow is withdrawn or archived, or once that person is no longer an active member, and every
 query is scoped to the key's organisation and workflow. Responses carry no request text and no vendor fields.
 
+## Bulk JD import
+
+`/jd-import` (`src/lib/jd-import.functions.ts`, every function `requireOrg` + `requireCapability("pipeline.requisitions")`;
+cores in `src/lib/jd-import.server.ts` assert HR head / President-CBO / recruiter and filter every query by `orgId`).
+JD text and the tenant's sector list enter the extraction prompt only through `untrusted(...)` with
+`INJECTION_RULES`; the pairwise duplicate comparison sends two structured profiles, also fenced; both calls are
+zod-validated through `aiJson` (`jd_requirements`, `jd_duplicate_check`). Nothing is linked or created from a held
+file without the recruiter's decision, and a decision is claimed atomically (one reviewer wins). Every matched
+requisition passes `assertRequisitionInOrg` before a link or a pipeline seed. Auto-approved requisitions exist only
+when tenant governance enabled `auto_approved` (step-up, audited); the core then writes the trail entry
+server-side with `policyAuditId` pointing at that audit row and fails closed when none is found or a later change
+switched the gate back. Variant seeding never copies `role_only` (portal-terms) or merged candidates. Sector-list
+edits are HR head / President-CBO only and audited (`sector_taxonomy.updated`).
+
 ## Training data
 
 `training_inferences` and `training_feedback` hold prompts and outputs that
