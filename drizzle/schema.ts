@@ -5427,7 +5427,7 @@ export const profileMatchScores = pgTable(
     coarseScore: numeric("coarse_score", { precision: 6, scale: 3 }).notNull().default("0"),
     coarseRank: integer("coarse_rank"),
     overallScore: integer("overall_score"),
-    stage: text("stage").$type<"coarse" | "judged">().notNull().default("coarse"),
+    reviewStage: text("review_stage").$type<"coarse" | "judged">().notNull().default("coarse"),
     factors: jsonb("factors")
       .$type<MatchFactor[]>()
       .notNull()
@@ -5452,7 +5452,7 @@ export const profileMatchScores = pgTable(
   (t) => [
     uniqueIndex("profile_match_scores_req_cand_key").on(t.requisitionId, t.candidateId),
     index("profile_match_scores_rank_idx").on(t.orgId, t.requisitionId),
-    check("profile_match_scores_stage_check", sql`${t.stage} in ('coarse','judged')`),
+    check("profile_match_scores_stage_check", sql`${t.reviewStage} in ('coarse','judged')`),
     check(
       "profile_match_scores_decision_check",
       sql`${t.decision} is null or ${t.decision} in ('shortlisted','rejected')`,

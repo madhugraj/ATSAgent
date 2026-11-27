@@ -252,7 +252,7 @@ describe("a ranking run", () => {
     expect(ids).not.toContain(roleOnly.id);
     const s = rows.find((r) => r.candidateId === strong.id)!;
     const w = rows.find((r) => r.candidateId === weak.id)!;
-    expect(s.stage).toBe("judged");
+    expect(s.reviewStage).toBe("judged");
     expect(s.overallScore!).toBeGreaterThan(w.overallScore ?? 0);
     // R1 cites C1 (real) and C99 (invented): only the real claim is evidence.
     expect(s.requirements[0]!.evidence).toHaveLength(1);

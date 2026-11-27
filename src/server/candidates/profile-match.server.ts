@@ -614,7 +614,7 @@ export async function runRequisitionMatch(
   const existing = await db
     .select({
       candidateId: profileMatchScores.candidateId,
-      stage: profileMatchScores.stage,
+      stage: profileMatchScores.reviewStage,
       stamp: profileMatchScores.profileStamp,
     })
     .from(profileMatchScores)
@@ -644,8 +644,8 @@ export async function runRequisitionMatch(
           coarseScore: sql`excluded.coarse_score`,
           coarseRank: sql`excluded.coarse_rank`,
           computedAt: sql`excluded.computed_at`,
-          factors: sql`case when ${profileMatchScores.stage} = 'judged' then ${profileMatchScores.factors} else excluded.factors end`,
-          knockouts: sql`case when ${profileMatchScores.stage} = 'judged' then ${profileMatchScores.knockouts} else excluded.knockouts end`,
+          factors: sql`case when ${profileMatchScores.reviewStage} = 'judged' then ${profileMatchScores.factors} else excluded.factors end`,
+          knockouts: sql`case when ${profileMatchScores.reviewStage} = 'judged' then ${profileMatchScores.knockouts} else excluded.knockouts end`,
         },
       });
   }
@@ -671,7 +671,7 @@ export async function runRequisitionMatch(
         await db
           .update(profileMatchScores)
           .set({
-            stage: "judged",
+            reviewStage: "judged",
             overallScore: j.overall,
             factors: j.factors,
             requirements: j.requirements,
