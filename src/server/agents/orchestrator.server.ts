@@ -274,10 +274,9 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     const reused = await reuseJdIfChosen(e.orgId, req.id);
     const jd = reused ? { status: "approved" as const } : await latestJd();
     if (!jd || jd.status === "draft" || jd.status === "changes_requested") {
-      await dispatch(
-        "jd",
-        `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
-      );
+      // A JD the person shared in the hiring thread is filed as written, not redrafted.
+      const { jdGoalForRequisition } = await import("../desk/desk.server");
+      await dispatch("jd", await jdGoalForRequisition(e.orgId, req));
     }
   }
 

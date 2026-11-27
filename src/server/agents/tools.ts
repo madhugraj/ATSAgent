@@ -13,7 +13,7 @@ import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../db";
-import { departments, jobDescriptions, requisitions } from "@db/schema";
+import { agentRuns, departments, hiringMessages, jobDescriptions, requisitions } from "@db/schema";
 import { placeLabel } from "@/lib/work-mode";
 import { registerTool, type ToolContext } from "./registry";
 
@@ -538,12 +538,102 @@ export function registerPhase1Tools(): void {
       // Tell the hiring-desk thread (if any) which template shaped this draft.
       const { noteJdTemplate } = await import("../desk/desk.server");
       await noteJdTemplate(ctx.orgId, ctx.runId, saved.version, template);
+      const { postFiledJd } = await import("../desk/desk.server");
+      await postFiledJd(ctx.orgId, ctx.runId, saved.id, false);
       return {
         jdId: saved.id,
         version: saved.version,
         template: template ? `${template.name} (${template.reason})` : "none — built-in format",
         purpose: jd.purpose,
         mustHave: jd.must_have,
+      };
+    },
+  });
+
+  registerTool({
+    name: "import_jd_version",
+    description:
+      "File the person's OWN job description for the requisition, word for word, as the next version for Department Head review — use this instead of submit_jd_version whenever they gave you a JD. Leave jdText out to take the JD they attached or pasted into this hiring thread; pass jdText only when the run has no thread. Blank must-have / good-to-have skills and experience on the requisition are filled from it; nothing already set is overwritten.",
+    input: RequisitionId.extend({
+      jdText: z.string().min(200).max(30000).optional(),
+    }),
+    risk: "write",
+    skills: ["jd_import"],
+    describe: () => "File the person's own job description for review",
+    run: async (ctx, i) => {
+      const r = await loadRequisition(ctx.orgId, i.requisitionId);
+      if (!["approved", "pending_dh", "pending_hr", "pending_cbo"].includes(r.status)) {
+        throw new Error(
+          `The requisition is ${r.status}; JDs are filed for submitted or approved requisitions.`,
+        );
+      }
+      let jdText = i.jdText?.trim() ?? "";
+      if (!jdText) {
+        // Read the JD straight from the person's message so it is never retyped by the model.
+        const [run] = await db
+          .select({ conversationId: agentRuns.conversationId })
+          .from(agentRuns)
+          .where(and(eq(agentRuns.id, ctx.runId), eq(agentRuns.orgId, ctx.orgId)))
+          .limit(1);
+        if (run?.conversationId) {
+          const recent = await db
+            .select({ body: hiringMessages.body, card: hiringMessages.card })
+            .from(hiringMessages)
+            .where(
+              and(
+                eq(hiringMessages.conversationId, run.conversationId),
+                eq(hiringMessages.orgId, ctx.orgId),
+                eq(hiringMessages.role, "user"),
+              ),
+            )
+            .orderBy(desc(hiringMessages.createdAt))
+            .limit(50);
+          // An attached JD (file or long paste) wins; else their latest long message.
+          const attached = recent.find(
+            (m) => (m.card as { type?: string } | null)?.type === "own_jd",
+          );
+          jdText =
+            (attached ?? recent.find((m) => m.body.trim().length >= 200))?.body.trim() ?? "";
+        }
+      }
+      if (!jdText) {
+        throw new Error(
+          "No job description found — ask the person to paste their JD into this thread, or use the requisition page's “I already have a JD”.",
+        );
+      }
+      const { importJdCore } = await import("@/lib/matching.functions");
+      const parsed = await importJdCore(ctx.orgId, { jdText, title: r.title });
+      const { saveJobDescriptionCore } = await import("@/lib/requisitions.server");
+      const saved = await saveJobDescriptionCore(await actor(ctx), {
+        requisitionId: r.id,
+        // The person's own text is the JD; the model only structures the fields around it.
+        jd: { ...parsed, full_text: jdText },
+      });
+
+      const { postFiledJd } = await import("../desk/desk.server");
+      await postFiledJd(ctx.orgId, ctx.runId, saved.id, true);
+
+      // Same blanks-only fill as the requisition page's import.
+      const patch: Partial<typeof requisitions.$inferInsert> = {};
+      if (parsed.must_have.length && !r.mustHaveSkills.length) patch.mustHaveSkills = parsed.must_have;
+      if (parsed.good_to_have.length && !r.goodToHaveSkills.length)
+        patch.goodToHaveSkills = parsed.good_to_have;
+      if ((parsed.experience_min || parsed.experience_max) && !r.experienceMin && !r.experienceMax) {
+        patch.experienceMin = Math.round(parsed.experience_min);
+        patch.experienceMax = Math.round(Math.max(parsed.experience_max, parsed.experience_min));
+      }
+      if (Object.keys(patch).length) {
+        await db
+          .update(requisitions)
+          .set(patch)
+          .where(and(eq(requisitions.id, r.id), eq(requisitions.orgId, ctx.orgId)));
+      }
+      return {
+        jdId: saved.id,
+        version: saved.version,
+        purpose: parsed.purpose,
+        mustHave: parsed.must_have,
+        filledOnRequisition: Object.keys(patch),
       };
     },
   });

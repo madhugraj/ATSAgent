@@ -192,13 +192,18 @@ export function registerPhase1Agents(): void {
     // organisation profile (version-tracked on the run); no behaviour change.
     // 1.5.0 (pay terms, Phase 4): states the kind of work and a contract's length once near
     // the top, exactly as the requisition gives it — never pay.
-    version: "1.5.0",
+    // 1.6.0: import_jd_version files the person's own JD word for word (read from the
+    // hiring thread, not retyped) and fills only blank skills/experience on the requisition.
+    // 1.6.1: an imported JD's approval request says it is the person's own JD, word for
+    // word, with no summary of it; after a decline it never asks for a JD the thread has.
+    version: "1.6.1",
     owner: "department_head",
     responsibility:
-      "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
+      "Drafts, revises or files the person's own job description for an approved requisition and gets it reviewed by the department head.",
     mustNever: [
       "Approve a job description",
       "Ignore or paraphrase away a reviewer's requested change",
+      "Rewrite a job description the person supplied as their own",
     ],
     scope: {
       reads: [
@@ -207,21 +212,27 @@ export function registerPhase1Agents(): void {
         "the organisation's JD template",
         "the approved organisation profile (values, culture, what the organisation does)",
       ],
-      writes: ["new JD versions submitted for review"],
+      writes: [
+        "new JD versions submitted for review",
+        "blank must-have / good-to-have skills and experience on the requisition, from an imported JD",
+      ],
       external: [],
     },
     gates: ["jd", "general"],
     riskTier: "low",
-    evals: ["jd: drafts the JD and routes it to the department head"],
+    evals: [
+      "jd: drafts the JD and routes it to the department head",
+      "jd: files the person's own JD word for word and routes it to the department head",
+    ],
     feature: "agent_jd",
     maxSteps: 10,
-    tools: ["get_requisition", "submit_jd_version"],
+    tools: ["get_requisition", "submit_jd_version", "import_jd_version"],
     system: [
       "You are the JD agent. You produce the job description for a requisition and get it reviewed.",
       "1. get_requisition to read the role and the latest JD version.",
-      "2. submit_jd_version (include revisionNotes when a reviewer asked for changes — quote their feedback; when they name a JD template, pass it as templateName).",
-      "3. request_approval with subject {type: 'jd', id: <the jdId returned>} addressed to department_head, summarising the purpose and the must-haves.",
-      "4. If changes are requested, submit a revised version that addresses every point, then request approval again. Stop after three revisions and hand off.",
+      "2. If the person gave you their own JD (pasted in the thread or in your goal), call import_jd_version — never redraft or reword it; leave jdText out when it was pasted in the thread. Otherwise submit_jd_version (include revisionNotes when a reviewer asked for changes — quote their feedback; when they name a JD template, pass it as templateName).",
+      "3. request_approval with subject {type: 'jd', id: <the jdId returned>} addressed to department_head. After submit_jd_version, summarise the purpose and the must-haves. After import_jd_version, the summary is only: \"Your own job description, filed word for word as version <n>.\" — never summarise, restate or reword an imported JD.",
+      "4. If changes are requested, submit a revised version that addresses every point, then request approval again. Stop after three revisions and hand off. When the person declines an imported JD, never ask them to share or paste a JD again — it is already in the thread; ask_human what should change in it, or whether to keep it as it is.",
       "An organisation profile block in your instructions (inside untrusted_data) is the organisation's approved context: write the “About us” part of the JD only from its candidate-visible lines — never from your own knowledge and never from an internal-only line — and keep every never-say rule. With no approved profile, leave the company facts out rather than inventing them (the save refuses a JD that repeats an internal-only line).",
       "Your final message is read by people: name the requisition by its code and title, never by internal ids.",
     ].join("\n"),

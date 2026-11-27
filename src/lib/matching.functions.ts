@@ -124,31 +124,56 @@ const JdImportInput = z.object({
   title: z.string().optional().nullable(),
 });
 
+const ImportedJdSchema = z.object({
+  detected_title: z.string().catch(""),
+  purpose: z.string().catch(""),
+  responsibilities: z.string().catch(""),
+  must_have: z.array(z.string()).catch([]),
+  good_to_have: z.array(z.string()).catch([]),
+  qualifications: z.string().catch(""),
+  success_factors: z.string().catch(""),
+  reporting_to: z.string().catch(""),
+  experience_min: z.coerce.number().catch(0),
+  experience_max: z.coerce.number().catch(0),
+  full_text: z.string().catch(""),
+});
+
+export type ImportedJd = z.infer<typeof ImportedJdSchema>;
+
 /**
  * Structure a recruiter's existing JD (pasted or extracted from PDF/DOCX) into the
  * same shape as an AI-drafted JD so scoring, must-have coverage and audit stay identical.
+ * Shared by the requisition page's import and the JD agent's import_jd_version.
  */
+export const importJdCore = createServerOnlyFn(async function importJdCore(
+  orgId: string,
+  data: z.infer<typeof JdImportInput>,
+): Promise<ImportedJd> {
+  const result = await aiJson<ImportedJd>({
+    orgId,
+    feature: "jd_import",
+    system:
+      `${INJECTION_RULES}\n\n` +
+      "You are parsing an EXISTING job description supplied by a recruiter. Extract, never invent. " +
+      "Keep the original wording where possible; only normalise structure. " +
+      "Return ONLY JSON with keys: detected_title, purpose, responsibilities (markdown bullets), " +
+      "must_have (string array of concrete skills), good_to_have (string array), qualifications, " +
+      "success_factors, reporting_to, experience_min (number, 0 if absent), experience_max (number, 0 if absent), " +
+      "full_text (the JD text as given).",
+    prompt: JSON.stringify({
+      title: data.title ?? null,
+      job_description: untrusted("existing_job_description", data.jdText),
+    }),
+    schema: ImportedJdSchema,
+  });
+  if (!result.ok) throw new Error(result.message);
+  return result.data;
+});
+
 export const importJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) => JdImportInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const result = await aiJson<
-      GeneratedJd & { experience_min: number; experience_max: number; detected_title: string }
-    >({
-      orgId: context.orgId,
-      feature: "jd_import",
-      system:
-        "You are parsing an EXISTING job description supplied by a recruiter. Extract, never invent. " +
-        "Keep the original wording where possible; only normalise structure. " +
-        "Return ONLY JSON with keys: detected_title, purpose, responsibilities (markdown bullets), " +
-        "must_have (string array of concrete skills), good_to_have (string array), qualifications, " +
-        "success_factors, reporting_to, experience_min (number, 0 if absent), experience_max (number, 0 if absent), " +
-        "full_text (the JD cleaned up as markdown).",
-      prompt: JSON.stringify(data),
-    });
-    if (!result.ok) throw new Error(result.message);
-    return result.data;
-  });
+  .handler(async ({ data, context }) => importJdCore(context.orgId, data));
 
 /* ------------------------------------------- JD-aware weight intelligence */
 

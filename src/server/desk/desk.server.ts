@@ -374,6 +374,10 @@ const Command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
+  /** "Stop" / "pause": halt every agent working on this role; the role itself stays open. */
+  z.object({ type: z.literal("stop_agents") }),
+  /** "Carry on" / "resume": start the agent for the role's next step again. */
+  z.object({ type: z.literal("resume_agents") }),
   /** "Show me the JD": post the role's latest job description into the thread. */
   z.object({ type: z.literal("show_jd") }),
   /** "Show the interview plan / rounds / panel size": post the role's plan, editable in place. */
@@ -432,9 +436,12 @@ const SYSTEM = [
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
   '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- When the recruiter says they already have a job description and FACTS show the role has none yet, ask them to attach it with the paperclip in the message box (PDF, Word or text) — never ask them to paste it, and never offer to write one. When FACTS show the role already has a job description, say which version and status it has and that typing "show the JD" displays it — do not ask for another.',
+  "- When the latest message is the recruiter's own job description, take every hiring detail it states (role, location, work mode, experience, openings, must-have and good-to-have skills, employment type, responsibilities, reporting line, education) and never ask for something it already states; that JD is filed as written once the role is approved, so do not offer to draft one.",
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- "command" also: "stop", "pause", "hold on", "stop the agents", "wait" (on their own, about the agents\' work) → {"type":"stop_agents"}; "carry on", "resume", "continue", "start the agents again" → {"type":"resume_agents"}.',
   '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
   '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
   '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
@@ -645,6 +652,142 @@ async function startForThread(
   return runId;
 }
 
+/** Card on the person's own job description, attached in the thread (file or long paste). */
+export const OWN_JD_CARD = "own_jd";
+
+/** Longest own JD the thread keeps word for word (a message is clipped beyond this). */
+export const OWN_JD_MAX = MESSAGE_MAX;
+
+async function threadHasOwnJd(conv: { id: string; orgId: string }): Promise<boolean> {
+  const [m] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        eq(hiringMessages.orgId, conv.orgId),
+        sql`${hiringMessages.card}->>'type' = ${OWN_JD_CARD}`,
+      ),
+    )
+    .limit(1);
+  return Boolean(m);
+}
+
+/** True when the role's latest JD is, word for word, a JD the person attached in this thread. */
+async function latestJdIsOwn(conv: Conversation): Promise<boolean> {
+  if (!conv.requisitionId) return false;
+  const [jd] = await db
+    .select({ fullText: jobDescriptions.fullText })
+    .from(jobDescriptions)
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, conv.requisitionId),
+        eq(jobDescriptions.orgId, conv.orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  if (!jd?.fullText) return false;
+  const words = (t: string) => t.replace(/\s+/g, " ").trim();
+  const own = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        eq(hiringMessages.orgId, conv.orgId),
+        sql`${hiringMessages.card}->>'type' = ${OWN_JD_CARD}`,
+      ),
+    );
+  const filed = words(jd.fullText);
+  return own.some((m) => words(m.body) === filed);
+}
+
+/** The JD agent's goal for an approved requisition, from its hiring thread (if any). */
+export async function jdGoalForRequisition(
+  orgId: string,
+  req: { id: string; code: string; title: string },
+): Promise<string> {
+  const conv = await conversationForRequisition(orgId, req.id);
+  return (await jdAgentBrief(conv ? { id: conv.id, orgId } : null, req)).goal;
+}
+
+/** The JD agent's goal: file the person's own JD when they shared one, else draft. */
+async function jdAgentBrief(
+  conv: { id: string; orgId: string } | null,
+  req: { code: string; title: string },
+): Promise<{ goal: string; announce: string }> {
+  if (conv && (await threadHasOwnJd(conv)))
+    return {
+      goal: `Requisition ${req.code} "${req.title}": the person shared their own job description in this thread. File it word for word with import_jd_version (leave jdText out) — do not draft a new one — and get it approved by the department head.`,
+      announce:
+        "I've asked the JD agent to file your job description as written; it will come back here for approval.",
+    };
+  return {
+    goal: `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+    announce:
+      "I've asked the JD agent to draft the job description; it will come back here for approval.",
+  };
+}
+
+/**
+ * The person attached their own JD (a file's text or a long paste): keep it
+ * verbatim in the thread and, when the role is ready for a JD, hand it to the
+ * JD agent to file as written. Otherwise it is used once the role is approved.
+ */
+export async function attachOwnJd(
+  conv: Conversation,
+  userId: string,
+  text: string,
+  fileName: string | null,
+): Promise<void> {
+  const card = { type: OWN_JD_CARD, fileName };
+  if (!conv.requisitionId) {
+    // Still describing the role: the desk reads the JD like any message, so
+    // every detail it states (title, place, experience, skills, duties) is taken.
+    await handleUserMessage(conv, userId, text, card);
+    return;
+  }
+  await postMessage(conv, { role: "user", body: text, card });
+  const [req] = await db
+    .select({ status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved") {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Got your job description. The JD agent will file it exactly as written as soon as the requisition is approved.",
+    });
+    return;
+  }
+  if (await latestJdIsOwn(conv)) {
+    await postMessage(conv, {
+      role: "desk",
+      body: 'This is already the role\'s job description — your text, word for word — so nothing needs to change. Type "show the JD" to see it.',
+    });
+    return;
+  }
+  // Approved role: file this JD now — as the next version when one exists, which
+  // goes to the department head again (the person chose to replace it).
+  const [r] = await db
+    .select({ code: requisitions.code, title: requisitions.title })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  const brief = await jdAgentBrief(conv, r!);
+  await startForThread(
+    conv,
+    "jd",
+    userId,
+    brief.goal,
+    conv.requisitionId,
+    (await latestJdStatus(conv.orgId, conv.requisitionId))
+      ? "I've asked the JD agent to file your job description as written as the next version; it replaces the current one once the department head approves it."
+      : brief.announce,
+  );
+}
+
 async function latestJdStatus(orgId: string, requisitionId: string) {
   const [jd] = await db
     .select({ status: jobDescriptions.status })
@@ -705,14 +848,8 @@ export async function continueWithRole(
       body: "Its job description is waiting for the department head's approval. I'll search the talent pool as soon as it is approved.",
     });
   } else {
-    await startForThread(
-      conv,
-      "jd",
-      userId,
-      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
-      req.id,
-      "I've asked the JD agent to draft the job description; it will come back here for approval.",
-    );
+    const brief = await jdAgentBrief(conv, req);
+    await startForThread(conv, "jd", userId, brief.goal, req.id, brief.announce);
   }
 }
 
@@ -1169,11 +1306,12 @@ export async function handleUserMessage(
   conv: Conversation,
   userId: string,
   text: string,
+  card?: DeskCard,
 ): Promise<void> {
   // The desk's AI work for a role counts towards that role's hiring cost.
   const { withAiSubject } = await import("../agents/context");
   return withAiSubject({ requisitionId: conv.requisitionId }, () =>
-    handleUserMessageInner(conv, userId, text),
+    handleUserMessageInner(conv, userId, text, card),
   );
 }
 
@@ -1181,8 +1319,9 @@ async function handleUserMessageInner(
   conv: Conversation,
   userId: string,
   text: string,
+  card?: DeskCard,
 ): Promise<void> {
-  await postMessage(conv, { role: "user", body: text });
+  await postMessage(conv, { role: "user", body: text, ...(card ? { card } : {}) });
   const history = await db
     .select({ role: hiringMessages.role, body: hiringMessages.body })
     .from(hiringMessages)
@@ -1301,6 +1440,19 @@ async function handleUserMessageInner(
   }
   if (cmd.type === "close_role") {
     await offerCloseRole(conv);
+    return;
+  }
+  if (cmd.type === "stop_agents") {
+    await stopRoleAgents(conv, userId);
+    return;
+  }
+  if (cmd.type === "resume_agents") {
+    const started = conv.requisitionId ? await startStage(conv, userId) : null;
+    if (!started)
+      await postMessage(conv, {
+        role: "desk",
+        body: "Nothing is waiting to start for this role right now — tell me what you'd like done next.",
+      });
     return;
   }
   if (cmd.type === "research") {
@@ -2683,14 +2835,8 @@ export async function startStage(
     if (jd === "pending_dh") return null; // waiting for the department head
     if (opts.dryRun) return "jd";
     if (await reuseJdIfChosen(conv.orgId, conv.requisitionId)) return null;
-    return startForThread(
-      conv,
-      "jd",
-      userId,
-      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
-      conv.requisitionId,
-      "I've asked the JD agent to draft the job description; it will come back here for approval.",
-    );
+    const brief = await jdAgentBrief(conv, req);
+    return startForThread(conv, "jd", userId, brief.goal, conv.requisitionId, brief.announce);
   }
   if (opts.dryRun) return "intake";
   return startForThread(
@@ -2889,6 +3035,57 @@ export async function publishRole(conv: Conversation, userId: string): Promise<s
   );
 }
 
+/**
+ * After the JD agent files a version: put the JD itself in the run's thread,
+ * right above its approval request, so the approver reads what they approve.
+ */
+export async function postFiledJd(
+  orgId: string,
+  runId: string,
+  jdId: string,
+  own: boolean,
+): Promise<void> {
+  const [run] = await db
+    .select({ conversationId: agentRuns.conversationId })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, orgId)))
+    .limit(1);
+  if (!run?.conversationId) return;
+  const [jd] = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      fullText: jobDescriptions.fullText,
+      templateName: jobDescriptions.templateName,
+      requisitionId: jobDescriptions.requisitionId,
+      code: requisitions.code,
+    })
+    .from(jobDescriptions)
+    .innerJoin(requisitions, eq(requisitions.id, jobDescriptions.requisitionId))
+    .where(and(eq(jobDescriptions.id, jdId), eq(jobDescriptions.orgId, orgId)))
+    .limit(1);
+  if (!jd?.fullText?.trim()) return;
+  await postMessage(
+    { id: run.conversationId, orgId },
+    {
+      role: "agent",
+      agentType: "jd",
+      body: own
+        ? `Your job description, filed word for word as version ${jd.version}:`
+        : `Job description drafted as version ${jd.version}:`,
+      card: {
+        type: "jd",
+        requisitionId: jd.requisitionId,
+        code: jd.code,
+        version: jd.version,
+        status: jd.status.replace("_", " "),
+        templateName: own ? null : jd.templateName,
+        text: jd.fullText.slice(0, 20_000),
+      },
+    },
+  );
+}
+
 /** After the JD agent files a draft: say in the thread which template shaped it. */
 export async function noteJdTemplate(
   orgId: string,
@@ -2981,7 +3178,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
     last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
-    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
+    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}${jd && (await latestJdIsOwn(conv)) ? " — it IS the recruiter's own job description (the one they attached), filed word for word; nothing of theirs is waiting to be used" : ""}.`,
     await jdTemplateFacts(conv.orgId, conv.requisitionId),
     `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
     await arrangedCallsFact(conv),
@@ -3095,6 +3292,41 @@ export async function closeRole(
   await advanceRequisitionCore(actor, { id: req.id, status: to, comment: reason });
   await onRequisitionEnded(conv.orgId, req.id, to, userId, reason);
   return { action: to === "rejected" ? "reject" : "close" };
+}
+
+/**
+ * "Stop": cancel every agent run still working on this thread's role (the
+ * role, its candidates, and anything the thread started) and their open
+ * requests. The role stays open; "carry on" starts its next step again.
+ */
+export async function stopRoleAgents(conv: Conversation, userId: string): Promise<number> {
+  const scope = conv.requisitionId
+    ? or(
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentRuns.subjectId, conv.requisitionId),
+        sql`${agentRuns.subjectId} in (select id from applications where requisition_id = ${conv.requisitionId} and org_id = ${conv.orgId})`,
+      )
+    : eq(agentRuns.conversationId, conv.id);
+  const active = await db
+    .select({ id: agentRuns.id, agentType: agentRuns.agentType })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        scope,
+      ),
+    );
+  const { cancelRun } = await import("../agents/runtime.server");
+  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
+  const names = [...new Set(active.map((r) => AGENT_NAME[r.agentType] ?? r.agentType))];
+  await postMessage(conv, {
+    role: "desk",
+    body: names.length
+      ? `Stopped: ${names.join(", ")}. Their open requests are withdrawn and the role stays open. Say "carry on" when you want the next step started again.`
+      : "No agent is working on this role right now, so there was nothing to stop.",
+  });
+  return active.length;
 }
 
 /** Mark the thread closed and say why (once). */
@@ -3314,7 +3546,7 @@ export async function advanceGathering(
     return;
   }
   // One question for a deeper JD, asked once; any answer (or "research it") moves on.
-  if (!slots.jdDetailsAsked) {
+  if (!slots.jdDetailsAsked && !(await threadHasOwnJd(conv))) {
     const asked = { ...slots, jdDetailsAsked: true };
     await db
       .update(hiringConversations)

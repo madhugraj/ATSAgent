@@ -143,6 +143,14 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It asks the department head to approve that version — candidates are only scored after approval.",
     ],
   },
+  "jd: files the person's own JD word for word and routes it to the department head": {
+    title: "Files your own job description without rewriting it",
+    situation: "An approved requisition, and the person gives the agent the JD they already wrote.",
+    checks: [
+      "It saves the person's JD exactly as written as the next version, instead of writing a new one.",
+      "It asks the department head to approve that version.",
+    ],
+  },
   "publishing: posts internally and puts the external post up for review": {
     title: "Posts the role internally; external posts wait for the HR head",
     situation: 'An approved role. The HR head declines the LinkedIn post ("Not this week").',

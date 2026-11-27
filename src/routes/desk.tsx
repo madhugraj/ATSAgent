@@ -15,6 +15,7 @@ import {
   Loader2,
   Maximize2,
   MessageSquarePlus,
+  Paperclip,
   RotateCcw,
   Send,
   Sparkles,
@@ -66,8 +67,10 @@ import {
   type AgentDecisionInput,
 } from "@/lib/agents.functions";
 import { withStepUp } from "@/lib/step-up-client";
+import { extractResumeText } from "@/lib/cv-extract";
 import {
   acceptDeskProposal,
+  attachDeskJd,
   enableDeskAgent,
   raiseDeskAgentBudget,
   rescoreDeskCandidates,
@@ -1102,6 +1105,7 @@ function Composer({
   value,
   onChange,
   onSend,
+  onAttach,
   busy,
   disabled,
   placeholder,
@@ -1109,26 +1113,73 @@ function Composer({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  /** Attach the person's own job description (PDF, DOCX or text). */
+  onAttach?: (file: File) => void;
   busy: boolean;
   disabled?: boolean;
   placeholder?: string | undefined;
 }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const off = busy || disabled;
   return (
     <div className="flex w-full items-end gap-2">
-      <Textarea
-        value={value}
-        disabled={busy || disabled}
-        placeholder={placeholder ?? "Type a message…"}
-        className="min-h-12 flex-1 resize-none"
-        rows={2}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
+      <div
+        className={`relative flex-1 rounded-md ${dragging ? "ring-2 ring-primary/40" : ""}`}
+        onDragOver={(e) => {
+          if (!onAttach || off) return;
+          e.preventDefault();
+          setDragging(true);
         }}
-      />
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          setDragging(false);
+          const f = e.dataTransfer.files?.[0];
+          if (!onAttach || off || !f) return;
+          e.preventDefault();
+          onAttach(f);
+        }}
+      >
+        <Textarea
+          value={value}
+          disabled={off}
+          placeholder={placeholder ?? "Type a message…"}
+          className={`min-h-12 w-full resize-none ${onAttach ? "pr-10" : ""}`}
+          rows={2}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+        />
+        {onAttach ? (
+          <>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".pdf,.doc,.docx,.txt,.md"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) onAttach(f);
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Attach your job description"
+              title="Attach your job description"
+              disabled={off}
+              onClick={() => fileInput.current?.click()}
+              className="absolute right-2 bottom-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+            >
+              <Paperclip className="size-4" />
+            </button>
+          </>
+        ) : null}
+      </div>
       <Button onClick={onSend} disabled={busy || disabled || !value.trim()}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Send
@@ -1639,9 +1690,57 @@ function Thread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compact, fanout?.id, liveTracks.length]);
 
+  /** The person's own JD (a file's text or a long paste), kept word for word. */
+  async function attachJd(jdText: string, fileName: string | null) {
+    setPending(fileName ?? "Job description");
+    try {
+      await attachDeskJd({ data: { id, text: jdText, fileName } });
+      refresh();
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not attach the job description");
+      return false;
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function attachFile(file: File) {
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("That file is over 10 MB");
+      return;
+    }
+    let jdText = "";
+    try {
+      setPending(file.name);
+      jdText = (await extractResumeText(file)).trim();
+    } catch (e) {
+      setPending(null);
+      toast.error(e instanceof Error ? e.message : "Could not read that file");
+      return;
+    }
+    setPending(null);
+    if (jdText.length < 200) toast.error("That file has too little text to be a job description");
+    else if (jdText.length > 12_000)
+      toast.error(
+        "That job description is over 12,000 characters — upload it on the requisition page",
+      );
+    else await attachJd(jdText, file.name);
+  }
+
   async function send() {
     const message = text.trim();
     if (!message) return;
+    // A message too long for chat is a pasted job description.
+    if (message.length > 2000) {
+      if (message.length > 12_000) {
+        toast.error("That's over 12,000 characters — upload the JD on the requisition page");
+        return;
+      }
+      setText("");
+      if (!(await attachJd(message, null))) setText(message);
+      return;
+    }
     setPending(message);
     setText("");
     try {
@@ -1808,6 +1907,7 @@ function Thread({
             value={text}
             onChange={setText}
             onSend={send}
+            onAttach={(f) => void attachFile(f)}
             busy={pending !== null}
             placeholder={
               d.status === "closed" ? "This role is closed — you can still ask about it" : undefined
@@ -1815,6 +1915,34 @@ function Thread({
           />
         </footer>
       </section>
+    </div>
+  );
+}
+
+/** The person's own JD in the thread: a compact file chip; its text opens in place. */
+function AttachedJd({ body, fileName }: { body: string; fileName: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex justify-end">
+      <div className="w-full max-w-[80%] rounded-lg border border-border bg-background text-sm">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left"
+          aria-expanded={open}
+        >
+          <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {fileName ?? "Job description"}
+          </span>
+          <span className="shrink-0 text-xs text-primary">{open ? "Hide" : "View"}</span>
+        </button>
+        {open ? (
+          <div className="max-h-80 overflow-y-auto border-t border-border px-3 py-2 text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
+            {body}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1895,7 +2023,11 @@ function Message({
         : undefined;
   return (
     <div className="space-y-2">
-      {m.body ? <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} /> : null}
+      {m.card?.type === "own_jd" ? (
+        <AttachedJd body={m.body} fileName={(m.card["fileName"] as string | null) ?? null} />
+      ) : m.body ? (
+        <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} />
+      ) : null}
       {m.card ? (
         <div className="ml-9 space-y-2">
           <Card card={m.card} conv={conv} onChanged={onChanged} compact={compact} />
@@ -1952,6 +2084,7 @@ function Card({
   if (card.type === "next_steps")
     return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "own_jd") return null; // shown as the attachment itself (AttachedJd)
   if (card.type === "proposal")
     return <ProposalCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "close_role")
