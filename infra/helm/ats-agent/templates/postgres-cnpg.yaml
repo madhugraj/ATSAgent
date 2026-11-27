@@ -1,0 +1,38 @@
+{{- if .Values.postgres.enabled }}
+# In-namespace postgres (CloudNativePG, same pattern as atsiq-db in ns atsiq).
+# The owner credential secret is pre-created out-of-band with username/password
+# keys so DATABASE_URL in ats-agent-env can carry the same password.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  imageName: {{ .Values.postgres.image }}
+  instances: {{ .Values.postgres.instances }}
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: false
+  enablePDB: true
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.dbName }}
+      owner: {{ .Values.postgres.dbOwner }}
+      encoding: UTF8
+      localeCType: C
+      localeCollate: C
+      secret:
+        name: {{ .Values.postgres.ownerSecret }}
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+    {{- if .Values.postgres.storage.storageClass }}
+    storageClass: {{ .Values.postgres.storage.storageClass }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
+  {{- if gt (int .Values.postgres.instances) 1 }}
+  maxSyncReplicas: {{ .Values.postgres.maxSyncReplicas }}
+  {{- end }}
+{{- end }}

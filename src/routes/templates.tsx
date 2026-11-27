@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Star } from "lucide-react";
 import { JobCard, ZoneOverlay, type JobCardZone } from "@/components/job-card";
 
 import { templatesQuery, type TemplateWire } from "@/lib/data";
 import { errorToastMessage } from "@/lib/errors";
+import { getEmailBrand } from "@/lib/email-brand.functions";
 import {
   analyzeTemplateFile,
   deleteTemplate,
@@ -54,7 +55,7 @@ const KINDS = [
   {
     kind: "jd" as const,
     title: "Job description templates",
-    hint: "Section headings, order and boilerplate for AI-drafted JDs.",
+    hint: "Section headings, order, boilerplate, accent, letterhead and footer for AI-drafted JDs.",
   },
   {
     kind: "job_card" as const,
@@ -88,13 +89,18 @@ type EditorState = {
   disclaimer: string;
   sectionHeadings: string;
   boilerplate: string;
-  /** offer_letter — fixed furniture captured verbatim. */
+  /** offer_letter and jd — fixed letterhead/footer furniture captured verbatim. */
   letterHeader: string;
   letterFooter: string;
+  /** offer_letter only. */
   letterSalutation: string;
   letterRefFormat: string;
   signatoryName: string;
   signatoryDesignation: string;
+  /** jd only — tone rules for the JD writer (template data, rendered fenced). */
+  writingStyle: string;
+  /** jd only — export typography. */
+  fontFamily: "system" | "serif" | "mono";
   accentColor: string;
   layout: "banner" | "side";
   overlayOpacity: number;
@@ -131,6 +137,8 @@ function emptyEditor(kind: (typeof KINDS)[number]["kind"]): EditorState {
     letterRefFormat: "",
     signatoryName: "",
     signatoryDesignation: "",
+    writingStyle: "",
+    fontFamily: "system",
     accentColor: "#4f46e5",
     layout: "banner",
     overlayOpacity: 38,
@@ -197,6 +205,15 @@ function applyAnalysis(state: EditorState, s: TemplateAnalysis): EditorState {
               state.signatoryDesignation,
           }
         : {}),
+      // jd — the accent colour is never taken from the sample's text; the
+      // picker keeps the org's brand colour (see the editor's prefill).
+      ...(state.kind === "jd"
+        ? {
+            letterHeader: ((cfg["headerLines"] as string[]) ?? []).join("\n"),
+            letterFooter: ((cfg["footerLines"] as string[]) ?? []).join("\n"),
+            writingStyle: (cfg["writingStyle"] as string) ?? state.writingStyle,
+          }
+        : {}),
     };
   }
   const zones = (cfg["zones"] as JobCardZone[]) ?? [];
@@ -253,6 +270,21 @@ function configFromEditor(e: EditorState) {
             signatory,
           }
         : {}),
+      ...(e.kind === "jd"
+        ? {
+            accentColor: e.accentColor,
+            headerLines: e.letterHeader
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            footerLines: e.letterFooter
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            writingStyle: e.writingStyle.trim() || null,
+            fontFamily: e.fontFamily,
+          }
+        : {}),
     };
   }
   return {
@@ -300,6 +332,15 @@ function editorFromTemplate(t: TemplateWire): EditorState {
               ((cfg["signatory"] as { designation?: string } | null)?.designation as string) ?? "",
           }
         : {}),
+      ...(t.kind === "jd"
+        ? {
+            accentColor: (cfg["accentColor"] as string) ?? "#4f46e5",
+            letterHeader: ((cfg["headerLines"] as string[]) ?? []).join("\n"),
+            letterFooter: ((cfg["footerLines"] as string[]) ?? []).join("\n"),
+            writingStyle: (cfg["writingStyle"] as string) ?? "",
+            fontFamily: (cfg["fontFamily"] as EditorState["fontFamily"] | undefined) ?? "system",
+          }
+        : {}),
     };
   }
   return {
@@ -323,6 +364,24 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
   const [selectedZone, setSelectedZone] = useState<number | null>(null);
   const set = <K extends keyof EditorState>(key: K, value: EditorState[K]) =>
     setState((s) => ({ ...s, [key]: value }));
+
+  // jd — the accent picker starts from the organisation's brand colour (the
+  // same setting the e-mail branding card edits); it stays the app indigo
+  // until that is set. Only a new template is prefilled — an existing one
+  // keeps whatever was saved.
+  const brand = useQuery({
+    queryKey: ["email_brand"],
+    queryFn: () => getEmailBrand(),
+    enabled: state.kind === "jd" && !state.id,
+  });
+  const brandPrefilled = useRef(false);
+  useEffect(() => {
+    if (state.kind !== "jd" || state.id || brandPrefilled.current || !brand.data) return;
+    brandPrefilled.current = true;
+    const color = brand.data.color?.toLowerCase();
+    if (color && /^#[0-9a-fA-F]{6}$/.test(color))
+      setState((s) => (s.accentColor === "#4f46e5" ? { ...s, accentColor: color } : s));
+  }, [brand.data, state.kind, state.id]);
 
   function updateZone(i: number, patch: Partial<JobCardZone>) {
     setState((s) => ({
@@ -589,6 +648,84 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
                 value={state.boilerplate}
                 onChange={(e) => set("boilerplate", e.target.value)}
                 placeholder="Our benefits, EOE statement, office address…"
+              />
+            </div>
+          </>
+        )}
+
+        {state.kind === "jd" && (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="mb-1.5 block text-xs text-muted-foreground">
+                  Brand accent (section headings)
+                </Label>
+                <input
+                  type="color"
+                  className="h-9 w-full cursor-pointer rounded-md border bg-background px-1"
+                  value={state.accentColor}
+                  onChange={(e) => set("accentColor", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="mb-1.5 block text-xs text-muted-foreground">
+                  Org logo (PNG / JPEG / WebP, ≤1 MB)
+                </Label>
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => set("logoFile", e.target.files?.[0] ?? null)}
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="mb-1.5 block text-xs text-muted-foreground">
+                Letterhead lines (rendered under the company name)
+              </Label>
+              <Textarea
+                rows={3}
+                value={state.letterHeader}
+                onChange={(e) => set("letterHeader", e.target.value)}
+                placeholder={"4th Floor, Tower B, Bengaluru 560001\nPhone: +91 …  ·  Web: …"}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="mb-1.5 block text-xs text-muted-foreground">
+                  Writing style (≤500 characters)
+                </Label>
+                <Textarea
+                  rows={3}
+                  maxLength={500}
+                  value={state.writingStyle}
+                  onChange={(e) => set("writingStyle", e.target.value)}
+                  placeholder={
+                    "Third person, present tense. Direct address to the reader. Short sentences."
+                  }
+                />
+              </div>
+              <div>
+                <Label className="mb-1.5 block text-xs text-muted-foreground">Font</Label>
+                <select
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  value={state.fontFamily}
+                  onChange={(e) => set("fontFamily", e.target.value as EditorState["fontFamily"])}
+                >
+                  <option value="system">System</option>
+                  <option value="serif">Serif</option>
+                  <option value="mono">Monospace</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <Label className="mb-1.5 block text-xs text-muted-foreground">
+                Page footer lines (every page)
+              </Label>
+              <Textarea
+                rows={2}
+                value={state.letterFooter}
+                onChange={(e) => set("letterFooter", e.target.value)}
+                placeholder={"This communication is confidential…\nRegistered Office: …"}
               />
             </div>
           </>

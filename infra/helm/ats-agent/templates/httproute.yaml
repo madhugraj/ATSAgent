@@ -1,0 +1,55 @@
+# HTTP → HTTPS redirect on the platform gateway's port-80 listener.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "atsagent.fullname" . }}-redirect
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+      namespace: {{ .Values.gateway.namespace }}
+      sectionName: {{ .Values.gateway.httpListener }}
+  hostnames:
+    {{- toYaml .Values.certificate.dnsNames | nindent 4 }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# Main route: TLS-terminated traffic to the app. Request timeout 300s — the
+# gateway default is 15s and slow server functions would be killed.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "atsagent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+      namespace: {{ .Values.gateway.namespace }}
+      sectionName: {{ .Values.gateway.httpsListener }}
+  hostnames:
+    {{- toYaml .Values.certificate.dnsNames | nindent 4 }}
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "atsagent.fullname" . }}-app
+          port: 80
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+      timeouts:
+        request: {{ .Values.gateway.requestTimeout }}

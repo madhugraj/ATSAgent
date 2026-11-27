@@ -11,7 +11,8 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { looksLikeInjection } from "../server/agents/injection";
 import { contentTypeFor, putObject, resumeObjectPath, safeFileName } from "../server/storage";
-import { applications, candidates } from "@db/schema";
+import { applications, candidateIdentityKeys, candidates } from "@db/schema";
+import { computeIdentityKeys, type NewKey } from "../server/candidates/identity.server";
 import { aiJson } from "./ai-gateway.server";
 
 export type ParsedCv = {
@@ -114,6 +115,8 @@ export type IngestResult = {
   email: string;
   alreadyApplied: boolean;
   merged: boolean;
+  /** True when a fuzzy/shared match was queued for the merge review queue. */
+  reviewQueued?: boolean;
   /** True when no email could be read and a placeholder was used. */
   emailMissing?: boolean;
   resumeStored: boolean;
@@ -285,6 +288,27 @@ async function ingestCandidateInner(input: {
     emailMissing = true;
   }
 
+  /** Identity keys for this arrival (design §1.2), computed once. */
+  const keysOf = (
+    row: {
+      fullName: string;
+      phone: string | null;
+      linkedinUrl: string | null;
+      githubUrl: string | null;
+    },
+    email: string,
+    fileHash: string | null,
+  ) => {
+    return computeIdentityKeys({
+      fullName: row.fullName,
+      email,
+      phone: row.phone,
+      linkedinUrl: row.linkedinUrl,
+      githubUrl: row.githubUrl,
+      fileHash,
+    });
+  };
+
   const row = {
     fullName: readName,
     email,
@@ -295,7 +319,10 @@ async function ingestCandidateInner(input: {
     skills: p?.skills ?? [],
     linkedinUrl:
       p?.linkedin_url ||
-      (/linkedin\.com\/(?:talent\/|in\/)/i.test(input.profileUrl ?? "") ? input.profileUrl : null),
+      (/linkedin\.com\/(?:talent\/|in\/)/i.test(input.profileUrl ?? "")
+        ? input.profileUrl
+        : null) ||
+      null,
     githubUrl: p?.github_url || null,
     websiteUrl: p?.website_url || null,
     currentEmployer: p?.current_employer || p?.employment_history?.[0]?.company || null,
@@ -311,28 +338,110 @@ async function ingestCandidateInner(input: {
   };
 
   // Dedupe strictly inside the target organisation (or the unassigned pool when
-  // no org is known), matching how the record will later be read.
+  // no org is known), matching how the record will later be read. Org-scoped
+  // arrivals resolve through the identity module (plan row 1) — strong keys,
+  // shared keys, file hash and fuzzy career-history evidence — while the
+  // unassigned pool keeps the legacy linkedin/email lookup (design §1.6).
   const orgScope = input.orgId ? eq(candidates.orgId, input.orgId) : isNull(candidates.orgId);
+  const fileHash = input.resumeFile?.bytes?.length
+    ? createHash("sha256").update(input.resumeFile.bytes).digest("hex")
+    : null;
 
   const result = await db.transaction(
-    async (tx): Promise<{ candidateId: string; alreadyApplied: boolean; merged: boolean }> => {
+    async (
+      tx,
+    ): Promise<{
+      candidateId: string;
+      alreadyApplied: boolean;
+      merged: boolean;
+      reviewQueued: boolean;
+      reviewMatch: {
+        candidateId: string;
+        score: number;
+        reasons: { signal: string; detail: string }[];
+      } | null;
+    }> => {
+      const { resolveIdentity, insertCandidateKeys, lookupKeyOwners, legacyIdentityLookup } =
+        await import("../server/candidates/identity.server");
+      let keys: NewKey[] = [];
+      let reviewQueued = false;
+
       let existing: { id: string; skills: string[] | null } | undefined;
-      if (row.linkedinUrl) {
-        [existing] = await tx
-          .select({ id: candidates.id, skills: candidates.skills })
-          .from(candidates)
-          .where(and(orgScope, eq(candidates.linkedinUrl, row.linkedinUrl)))
-          .limit(1);
-      }
-      if (!existing) {
-        [existing] = await tx
-          .select({ id: candidates.id, skills: candidates.skills })
-          .from(candidates)
-          .where(and(orgScope, eq(candidates.email, email)))
-          .limit(1);
+      let reviewMatch: {
+        candidateId: string;
+        score: number;
+        reasons: { signal: string; detail: string }[];
+      } | null = null;
+
+      if (input.orgId) {
+        const outcome = await resolveIdentity(
+          {
+            orgId: input.orgId,
+            fullName: row.fullName,
+            email,
+            phone: row.phone ?? null,
+            linkedinUrl: row.linkedinUrl ?? null,
+            githubUrl: row.githubUrl ?? null,
+            fileHash,
+            employmentHistory: row.employmentHistory,
+            education: row.education,
+            location: row.location,
+          },
+          tx,
+        );
+        keys = keysOf(row, email, fileHash);
+        if (outcome.outcome === "merged" || outcome.outcome === "attach") {
+          [existing] = await tx
+            .select({ id: candidates.id, skills: candidates.skills })
+            .from(candidates)
+            .where(and(orgScope, eq(candidates.id, outcome.candidateId)))
+            .limit(1);
+        } else {
+          // Keyless rows (pre-A1 records, fixtures, rows created outside the
+          // module) are invisible to the key lookup — fall back to the legacy
+          // exact email/linkedin match so they keep deduping. A legacy match
+          // beats a fuzzy review: a strong contact detail is the better
+          // evidence (design §1.7, migration-safe wiring).
+          const legacy = await legacyIdentityLookup(tx, input.orgId, {
+            email,
+            linkedinUrl: row.linkedinUrl,
+          });
+          if (legacy) {
+            [existing] = await tx
+              .select({ id: candidates.id, skills: candidates.skills })
+              .from(candidates)
+              .where(and(orgScope, eq(candidates.id, legacy.id)))
+              .limit(1);
+            reviewMatch = null;
+          } else if (outcome.outcome === "review") {
+            reviewMatch = {
+              candidateId: outcome.matchedCandidateId,
+              score: outcome.score,
+              reasons: outcome.reasons,
+            };
+          }
+        }
+      } else {
+        // Legacy pool lookup: linkedin first, then the (possibly placeholder)
+        // email — placeholder equality is exactly what email matching did.
+        if (row.linkedinUrl) {
+          [existing] = await tx
+            .select({ id: candidates.id, skills: candidates.skills })
+            .from(candidates)
+            .where(and(orgScope, eq(candidates.linkedinUrl, row.linkedinUrl)))
+            .limit(1);
+        }
+        if (!existing) {
+          [existing] = await tx
+            .select({ id: candidates.id, skills: candidates.skills })
+            .from(candidates)
+            .where(and(orgScope, eq(candidates.email, email)))
+            .limit(1);
+        }
       }
 
       let candidateId: string;
+      let createdHere = false;
       if (existing) {
         const skills = new Set(
           [...(existing.skills ?? []), ...row.skills].map((s) => s.trim()).filter(Boolean),
@@ -354,7 +463,7 @@ async function ingestCandidateInner(input: {
         const { source: _firstSourceKept, ...refresh } = updateRow as typeof row;
         await tx
           .update(candidates)
-          .set({ ...refresh, skills: [...skills] })
+          .set({ ...refresh, skills: [...skills], ...(fileHash ? { fileHash } : {}) })
           .where(eq(candidates.id, existing.id));
         candidateId = existing.id;
       } else {
@@ -365,12 +474,72 @@ async function ingestCandidateInner(input: {
           .insert(candidates)
           .values({
             ...row,
+            ...(fileHash ? { fileHash } : {}),
             poolUse,
             poolUseSource: poolUse === "role_only" ? input.source : null,
           })
           .returning({ id: candidates.id });
         if (!created) throw new Error("Could not save the candidate.");
         candidateId = created.id;
+        createdHere = true;
+      }
+
+      // Identity keys: written only for org-scoped candidates (design §1.6).
+      // For a merged arrival the survivor already holds the colliding key —
+      // conflicts are skipped. For a fresh arrival a key collision means a
+      // concurrent intake won the race while we were inserting: the newcomer
+      // is rolled back and the arrival resolves into the key's owner instead
+      // (design §1.3, concurrency).
+      if (input.orgId) {
+        let placed = false;
+        if (createdHere) {
+          try {
+            await tx.transaction(async (sp) => {
+              await sp.insert(candidateIdentityKeys).values(
+                keys.map((k) => ({
+                  orgId: input.orgId as string,
+                  candidateId,
+                  keyType: k.keyType,
+                  keyValue: k.keyValue,
+                })),
+              );
+            });
+            placed = true;
+          } catch (e) {
+            if ((e as { code?: string }).code !== "23505") throw e;
+            // Lost the race: a concurrent arrival inserted the same key first.
+            // Fall back to its owner rather than leaving a keyless duplicate.
+            const owners = await lookupKeyOwners(tx, input.orgId, keys);
+            const owner = owners.find((o) => o.candidateId !== candidateId);
+            if (owner) {
+              await tx.delete(candidates).where(eq(candidates.id, candidateId));
+              const [ownerRow] = await tx
+                .select({ id: candidates.id, skills: candidates.skills })
+                .from(candidates)
+                .where(and(orgScope, eq(candidates.id, owner.candidateId)))
+                .limit(1);
+              if (!ownerRow) throw e;
+              existing = ownerRow;
+              const skills = new Set(
+                [...(ownerRow.skills ?? []), ...row.skills].map((s) => s.trim()).filter(Boolean),
+              );
+              const { source: _s, ...refresh } = row;
+              await tx
+                .update(candidates)
+                .set({ ...refresh, skills: [...skills], ...(fileHash ? { fileHash } : {}) })
+                .where(eq(candidates.id, owner.candidateId));
+              candidateId = owner.candidateId;
+              reviewQueued = false;
+              reviewMatch = null;
+              placed = true;
+            }
+          }
+        }
+        if (!placed) {
+          // Merged arrivals: record the newcomer's other keys against the
+          // survivor; colliding keys stay with their current owner.
+          await insertCandidateKeys(tx, input.orgId, candidateId, keys);
+        }
       }
 
       let alreadyApplied = false;
@@ -396,9 +565,27 @@ async function ingestCandidateInner(input: {
         }
       }
 
-      return { candidateId, alreadyApplied, merged: Boolean(existing) };
+      return { candidateId, alreadyApplied, merged: Boolean(existing), reviewQueued, reviewMatch };
     },
   );
+
+  // A fuzzy or shared-evidence match on a trusted surface enqueues a pair for
+  // the merge review queue — never an automatic merge (design §1.3).
+  if (result.reviewMatch && input.orgId) {
+    try {
+      const { enqueueMergeSuggestion } = await import("../server/candidates/identity.server");
+      await enqueueMergeSuggestion({
+        orgId: input.orgId,
+        existingId: result.reviewMatch.candidateId,
+        newcomerId: result.candidateId,
+        score: result.reviewMatch.score,
+        reasons: result.reviewMatch.reasons,
+      });
+      result.reviewQueued = true;
+    } catch (e) {
+      console.error("[intake] could not enqueue the merge suggestion:", e);
+    }
+  }
 
   let resumeStored = false;
   let resumeError: string | null = null;

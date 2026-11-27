@@ -1,3 +1,10 @@
+# Content templates — branded JDs + tenant workflow profile (2026-11-27)
+
+Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identification/`, design in `docs/candidate-identification/track-b-design.md`):
+
+- **Tenant workflow profile (B1)**: `org_workflow_profiles` (migration 0094; absent row = full pipeline) applied by a platform super admin per organisation; the resolved capability set (`src/lib/capabilities*.ts`) gates nav, routes, server functions (`requireCapability`, B1b) and agent tools (B1a) — enforced by the strict completeness sweep; template/custom profiles fail closed if their workflow loses publication or its grant; governance-only settings (approval gate vs auto-approved bulk requisitions, duplicate lookback, pay tolerance) with step-up on `auto_approved`; switching never deletes data and every change is audited.
+- **Branded JD templates (B2)**: the `jd` template config carries accent, letterhead/footer lines, writing style and font; import from a sample file now fences the sample as untrusted data and starts the analyst prompt with the injection rules (fixing a pre-existing unfenced path — invariant called out in the PR); writing style, boilerplate and instructions render into generation prompts inside `untrusted_data` fences; save-time config validation; `writeAudit` on template save/delete/default; branded PDF and Word export of every JD from the requisition page (`docx` npm, covered by the bundle-import guard's build-time check).
+
 # Roadmap
 
 ## Candidate identification — row 1, candidate identity (2026-11-27)
@@ -19,8 +26,14 @@
       `shared_*` key so the detail never auto-merges anyone again)
 - [x] Per-organisation thresholds (`candidate_identity_settings`): auto-merge switch, fuzzy
       high/low thresholds, default phone region — DB defaults, no backfill
-- [ ] A1b: route all nine candidate-creating intake paths through the module (the scattered
-      exact-email checks go away then)
+- [x] A1b: all candidate-creating intake paths route through the module — intake core
+      (upload, inbox, board, capture), public apply (lookup-only: links the application,
+      never mutates, conflicting evidence queues a review), IJP apply (the raw-email lookup
+      is gone), recruiter manual add (a collision queues a review instead of silently
+      duplicating), provider search import (the external-id upsert stays as a signal key);
+      the talent-pool bulk merge goes through the reversible core; tombstoned rows are
+      invisible to the pool-match sweep, talent search, the candidates list and attach;
+      the unassigned pool keeps its legacy lookup until assignment
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
@@ -485,7 +498,7 @@ Plan: `docs/agentic-plan.md`.
 ATSAgent builds, runs and deploys with no Lovable packages, routes, env vars or hosted services.
 
 - [x] Build — `@lovable.dev/vite-tanstack-config` replaced by an explicit `vite.config.ts` (TanStack Start, Tailwind, tsconfig paths, React, Nitro `node-server` on build); `bun.lock` resolves from the public npm registry
-- [x] Email — SMTP (`SMTP_URL`) is the only transport; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
+- [x] Email — first-party transports only: SMTP (`SMTP_URL`), else Microsoft Graph client-credentials `sendMail` as the `EMAIL_FROM` mailbox (`MICROSOFT_OAUTH_*` keys) when the tenant blocks SMTP basic auth; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
 - [x] Careers inbox — the Gmail reader behind Lovable's connector gateway is retired; mail arrives only through each organisation's careers address (signed inbound webhook), and `/api/public/inbox-sync` now scores what arrived
 - [x] Leftovers — `@supabase/supabase-js`, the unused Supabase clients, editor-preview auth/error hooks, `.lovable/`, `supabase/` and `drizzle/migrations/` removed; DB types live in `src/lib/database.types.ts`, cron auth in `src/server/cron-auth.ts`
 - [x] Config — `LOVABLE_CRON_SECRET(_PREVIOUS)` renamed to `CRON_SECRET(_PREVIOUS)`; migration `0023` moves `ai_settings` off the `'lovable'` provider default to `openai` / `gpt-5.5`

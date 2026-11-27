@@ -48,6 +48,8 @@ import { CvUpload } from "@/components/CvUpload";
 import { rankPool } from "@/lib/shortlist";
 import { publishToLinkedIn } from "@/lib/linkedin.functions";
 import { getTemplateBackground, getTemplateLogo, validateJobCard } from "@/lib/templates.functions";
+import { downloadJdPdf, jdBrandFromConfig, type JdDocument } from "@/lib/jd-pdf";
+import { downloadJdDocx } from "@/lib/jd-docx";
 
 import { useRoles } from "@/hooks/useRoles";
 import { useOrg } from "@/hooks/useOrg";
@@ -172,6 +174,17 @@ function RequisitionDetail() {
   const cardLogo = logoQ.data?.ok
     ? { base64: logoQ.data.base64, contentType: logoQ.data.contentType }
     : null;
+  const jdTemplates = allTemplates.filter((t) => t.kind === "jd");
+  const jdTemplate =
+    jdTemplates.find((t) => t.id === jdTemplateId) ?? jdTemplates.find((t) => t.is_default) ?? null;
+  const jdLogoQ = useQuery({
+    queryKey: ["template_logo", "jd", jdTemplate?.id ?? "none"],
+    enabled: Boolean(jdTemplate?.has_logo),
+    queryFn: async () => getTemplateLogo({ data: { templateId: jdTemplate!.id } }),
+  });
+  const jdLogo = jdLogoQ.data?.ok
+    ? { base64: jdLogoQ.data.base64, contentType: jdLogoQ.data.contentType }
+    : null;
   const bgQ = useQuery({
     queryKey: ["template_background", cardTemplate?.id ?? "none"],
     enabled: Boolean(cardTemplate?.has_background),
@@ -203,6 +216,45 @@ function RequisitionDetail() {
   const latestJd = (jds.data ?? [])[0];
   const scoreMap = latestScores(scores.data ?? []);
   const pipeline = (apps.data ?? []).filter((a) => a.requisition_id === r.id);
+
+  const jdExportDoc = (): JdDocument | null => {
+    // Blank editor text still exports the saved JD (the textarea shows it).
+    const fullText = (jdText || latestJd?.full_text || "").trim();
+    if (!latestJd || !fullText) return null;
+    // The version's own recorded template wins — an older JD drafted under
+    // template A exports with A's branding even after the selector moved on.
+    const exportTemplate =
+      jdTemplates.find((t) => t.id === latestJd.template_id) ??
+      jdTemplates.find((t) => t.id === jdTemplateId) ??
+      jdTemplates.find((t) => t.is_default) ??
+      null;
+    return {
+      title: r.title,
+      orgName,
+      fullText,
+      brand: jdBrandFromConfig(exportTemplate?.config),
+    };
+  };
+
+  function exportJdPdf() {
+    const d = jdExportDoc();
+    if (!d) return;
+    try {
+      downloadJdPdf(d, jdLogo);
+    } catch {
+      toast.error("Could not build the PDF");
+    }
+  }
+
+  async function exportJdDocx() {
+    const d = jdExportDoc();
+    if (!d) return;
+    try {
+      await downloadJdDocx(d, jdLogo);
+    } catch {
+      toast.error("Could not build the Word document");
+    }
+  }
 
   const savedOverrides = (r?.job_card_overrides ?? {}) as {
     zones?: JobCardZone[];
@@ -957,6 +1009,20 @@ function RequisitionDetail() {
                     <Link to="/matching" search={{ req: r.id }}>
                       Score candidates against this JD
                     </Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={exportJdPdf}
+                    disabled={!latestJd || jdLogoQ.isFetching}
+                  >
+                    PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void exportJdDocx()}
+                    disabled={!latestJd || jdLogoQ.isFetching}
+                  >
+                    Word
                   </Button>
                 </div>
               </div>

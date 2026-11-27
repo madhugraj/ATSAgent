@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "atsagent.fullname" . }}-parser-sandbox
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "atsagent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: parser
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "atsagent.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: app
+      ports:
+        - { port: {{ .Values.parser.service.port }}, protocol: TCP }
+  egress: []   # deny all: the parser never reaches the network

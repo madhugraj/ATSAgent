@@ -9,6 +9,12 @@
  * left external (and did not copy into .output/server/node_modules) would
  * otherwise only fail when a request reaches the module that imports it.
  * Resolves each static import without executing any module.
+ *
+ * There is deliberately no per-package list: every package in the graph is
+ * covered by the same rule. A package nitro inlines (e.g. docx, which lands
+ * in .output/server/_libs/docx.mjs with no bare imports left) cannot go
+ * missing at runtime by construction — and if it stops resolving at all,
+ * `vite build` fails first because app code imports it statically.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";

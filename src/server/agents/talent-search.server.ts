@@ -8,7 +8,7 @@
  * location break ties. The AI scoring that follows (score_new_applications)
  * judges real fit; this only decides who is worth scoring.
  */
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { aiJson } from "@/lib/ai-gateway.server";
@@ -234,6 +234,8 @@ export async function searchPoolBySkills(
     .where(
       and(
         eq(candidates.orgId, orgId),
+        // Absorbed rows are tombstones after a merge (plan row 1).
+        isNull(candidates.mergedIntoId),
         // CVs a portal limited to their own role are never reused (migration 0045).
         eq(candidates.poolUse, "pool"),
         ...(exclude ? [exclude] : []),

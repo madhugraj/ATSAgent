@@ -276,51 +276,118 @@ export const importCandidates = createServerFn({ method: "POST" })
       limit: data.limit,
     });
 
+    const { resolveIdentity, insertCandidateKeys, enqueueMergeSuggestion } =
+      await import("../server/candidates/identity.server");
+    const { computeIdentityKeys } = await import("./candidates/identity-normalise");
     let imported = 0;
     for (const c of found) {
-      const [cand] = await db
-        .insert(candidates)
-        .values({
-          orgId: context.orgId,
-          fullName: c.full_name,
-          email: c.email,
-          phone: c.phone,
-          location: c.location,
-          source: data.provider,
-          experienceYears: String(c.experience_years),
-          education: c.education,
-          skills: c.skills,
-          resumeText: c.resume_text,
-          linkedinUrl: c.linkedin_url,
-          githubUrl: c.github_url,
-          externalId: c.external_id,
-          externalProvider: data.provider,
-          // A portal's database may limit its CVs to the role (job-channels.ts).
-          poolUse: poolUseFor(data.provider),
-          poolUseSource: poolUseFor(data.provider) === "role_only" ? data.provider : null,
-        })
-        .onConflictDoUpdate({
-          // Partial unique index candidates_external_unique on
-          // (external_provider, external_id) where external_id is not null.
-          target: [candidates.externalProvider, candidates.externalId],
-          targetWhere: sql`${candidates.externalId} is not null`,
-          // Never touch another organisation's candidate row on conflict.
-          setWhere: eq(candidates.orgId, context.orgId),
-          set: {
-            fullName: c.full_name,
-            email: c.email,
-            phone: c.phone,
-            location: c.location,
-            experienceYears: String(c.experience_years),
-            education: c.education,
-            skills: c.skills,
-            resumeText: c.resume_text,
-            linkedinUrl: c.linkedin_url,
-            githubUrl: c.github_url,
-          },
-        })
-        .returning({ id: candidates.id });
+      // Identity resolution (plan row 1): the external-id upsert below stays
+      // as an additional signal, but a person the pool already holds via a
+      // strong key is reused, not duplicated (design §1.7).
+      const outcome = await resolveIdentity({
+        orgId: context.orgId,
+        fullName: c.full_name,
+        email: c.email,
+        phone: c.phone,
+        linkedinUrl: c.linkedin_url,
+        githubUrl: c.github_url,
+        education: c.education,
+        location: c.location,
+      });
+      const resolvedId =
+        outcome.outcome === "merged" || outcome.outcome === "attach" ? outcome.candidateId : null;
+
+      const [cand] = resolvedId
+        ? [{ id: resolvedId }]
+        : await db
+            .insert(candidates)
+            .values({
+              orgId: context.orgId,
+              fullName: c.full_name,
+              email: c.email,
+              phone: c.phone,
+              location: c.location,
+              source: data.provider,
+              experienceYears: String(c.experience_years),
+              education: c.education,
+              skills: c.skills,
+              resumeText: c.resume_text,
+              linkedinUrl: c.linkedin_url,
+              githubUrl: c.github_url,
+              externalId: c.external_id,
+              externalProvider: data.provider,
+              // A portal's database may limit its CVs to the role (job-channels.ts).
+              poolUse: poolUseFor(data.provider),
+              poolUseSource: poolUseFor(data.provider) === "role_only" ? data.provider : null,
+            })
+            .onConflictDoUpdate({
+              // Partial unique index candidates_external_unique on
+              // (external_provider, external_id) where external_id is not null.
+              target: [candidates.externalProvider, candidates.externalId],
+              targetWhere: sql`${candidates.externalId} is not null`,
+              // Never touch another organisation's candidate row on conflict.
+              setWhere: eq(candidates.orgId, context.orgId),
+              set: {
+                fullName: c.full_name,
+                email: c.email,
+                phone: c.phone,
+                location: c.location,
+                experienceYears: String(c.experience_years),
+                education: c.education,
+                skills: c.skills,
+                resumeText: c.resume_text,
+                linkedinUrl: c.linkedin_url,
+                githubUrl: c.github_url,
+              },
+            })
+            .returning({ id: candidates.id });
       if (!cand) continue;
+      if (!resolvedId) {
+        // New record: record its identity keys (collisions skipped — they
+        // belong to whoever holds them), and queue a review when the fuzzy or
+        // shared-evidence path asked for one.
+        try {
+          await insertCandidateKeys(
+            db,
+            context.orgId,
+            cand.id,
+            computeIdentityKeys({
+              fullName: c.full_name,
+              email: c.email,
+              phone: c.phone,
+              linkedinUrl: c.linkedin_url,
+              githubUrl: c.github_url,
+              fileHash: null,
+              externalProvider: data.provider,
+              externalId: c.external_id,
+            }),
+          );
+        } catch (e) {
+          console.error("[importCandidates] could not record identity keys:", e);
+        }
+        if (outcome.outcome === "review") {
+          try {
+            await enqueueMergeSuggestion({
+              orgId: context.orgId,
+              existingId: outcome.matchedCandidateId,
+              newcomerId: cand.id,
+              score: outcome.score,
+              reasons: outcome.reasons,
+            });
+          } catch (e) {
+            console.error("[importCandidates] could not enqueue the merge suggestion:", e);
+          }
+        }
+      } else {
+        // Reused record: keep the external id as a signal key.
+        try {
+          await insertCandidateKeys(db, context.orgId, resolvedId, [
+            { keyType: "external", keyValue: `${data.provider}:${c.external_id}` },
+          ]);
+        } catch (e) {
+          console.error("[importCandidates] could not record the external key:", e);
+        }
+      }
 
       try {
         await db.insert(applications).values({

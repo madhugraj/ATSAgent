@@ -11,6 +11,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, requisitions } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const Token = z.object({ token: z.string().regex(/^[a-f0-9]{32,64}$/) });
 
@@ -52,7 +53,7 @@ const payAccess = createServerOnlyFn(async function payAccess(
 
 /** The candidate's pay per application — or `allowed: false` for anyone outside TA / HR. */
 export const getCandidateCompensation = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     if (!(await payAccess(context.userId, context.orgId)))
@@ -97,7 +98,7 @@ export const getCandidateCompensation = createServerFn({ method: "GET" })
   });
 
 export const recordCandidateCompensation = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) =>
     z
       .object({
@@ -122,7 +123,7 @@ export const recordCandidateCompensation = createServerFn({ method: "POST" })
 
 /** Send (or remind about) the form by hand. */
 export const sendCandidateCompensationForm = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) =>
     z
       .discriminatedUnion("action", [

@@ -361,8 +361,11 @@ export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
   "hrms.functions.ts": null,
   "collect.functions.ts": null, // public collection links
   "verification.functions.ts": null, // public candidate sync shares this module
-  "negotiation.functions.ts": null, // public candidate link /negotiate/:token
-  "compensation.functions.ts": null, // public candidate link /pay/:token
+  // Mixed modules (B1b review follow-up): the public token fns (candidate
+  // pages /negotiate/:token, /pay/:token) stay ungated — the token is the key;
+  // the logged-in, offer-related fns carry recruiting.offers.
+  "negotiation.functions.ts": "recruiting.offers",
+  "compensation.functions.ts": "recruiting.offers",
   "master.functions.ts": null, // Masters (governance)
   "org-profile.functions.ts": null, // Organisation profile (governance)
   "org-agreements.functions.ts": null, // governance
