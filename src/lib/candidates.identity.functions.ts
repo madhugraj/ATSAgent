@@ -13,6 +13,7 @@ import { db } from "../server/db";
 import { candidateIdentitySettings, candidateMergeSuggestions, candidates } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
 import {
+  assertMergeDecisionRole,
   decideSuggestion,
   getIdentitySettings,
   undoMerge,
@@ -101,9 +102,14 @@ export const listMergeSuggestionsFn = createServerFn({ method: "POST" })
         })
         .from(candidateMergeSuggestions)
         .innerJoin(
-          // a is the existing (matched) record; b joins below by id.
+          // a is the existing (matched) record; b joins below by id. Both
+          // tables carry their own explicit org predicate (AGENTS.md: every
+          // queried table is scoped, not just the driver).
           candidates,
-          eq(candidates.id, candidateMergeSuggestions.candidateAId),
+          and(
+            eq(candidates.id, candidateMergeSuggestions.candidateAId),
+            eq(candidates.orgId, context.orgId),
+          ),
         )
         .where(eq(candidateMergeSuggestions.orgId, context.orgId))
         .orderBy(desc(candidateMergeSuggestions.createdAt))
@@ -152,30 +158,41 @@ export const decideMergeSuggestionFn = createServerFn({ method: "POST" })
       })
       .parse(data),
   )
-  .handler(async ({ data, context }) =>
-    decideSuggestion({
+  .handler(async ({ data, context }) => {
+    // Merging people is privileged and destructive: role check (verdict
+    // finding 2) plus a server-side fresh-re-authentication requirement
+    // (verdict finding 3 — withStepUp in the UI is not a boundary).
+    await assertMergeDecisionRole(context.userId, context.orgId);
+    const { assertStepUp } = await import("../server/step-up");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    await assertStepUp(context.userId, getRequest());
+    return decideSuggestion({
       orgId: context.orgId,
       suggestionId: data.suggestionId,
       decision: data.decision,
       survivorId: data.survivorId ?? null,
       note: data.note ?? null,
       actor: { userId: context.userId, email: context.memberEmail },
-    }),
-  );
+    });
+  });
 
 export const undoMergeFn = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) =>
     z.object({ mergeId: z.string().uuid(), note: z.string().max(2000).nullish() }).parse(data),
   )
-  .handler(async ({ data, context }) =>
-    undoMerge({
+  .handler(async ({ data, context }) => {
+    await assertMergeDecisionRole(context.userId, context.orgId);
+    const { assertStepUp } = await import("../server/step-up");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    await assertStepUp(context.userId, getRequest());
+    return undoMerge({
       orgId: context.orgId,
       mergeId: data.mergeId,
       actor: { userId: context.userId, email: context.memberEmail },
       note: data.note ?? null,
-    }),
-  );
+    });
+  });
 
 export const getIdentitySettingsFn = createServerFn({ method: "POST" })
   .middleware([requireOrg])

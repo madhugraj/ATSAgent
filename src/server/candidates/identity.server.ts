@@ -13,7 +13,7 @@
  *  - undo is refused when a re-pointed child changed after the merge;
  *  - every query carries the caller's org_id — identity never crosses tenants.
  */
-import { and, desc, eq, getTableName, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, getTableName, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { writeAudit } from "../audit";
@@ -618,7 +618,9 @@ export async function mergeCandidatesCore(opts: {
       .where(eq(candidates.id, absorbed.id));
 
     // A pending suggestion whose pair involved either side can no longer be
-    // decided — flip it stale in the same transaction (design §1.4).
+    // decided — flip it stale in the same transaction (design §1.4). The
+    // suggestion being decided here is excluded: its own conditional update
+    // below decides it.
     await tx
       .update(candidateMergeSuggestions)
       .set({ status: "stale" })
@@ -630,6 +632,7 @@ export async function mergeCandidatesCore(opts: {
             inArray(candidateMergeSuggestions.candidateAId, [survivor.id, absorbed.id]),
             inArray(candidateMergeSuggestions.candidateBId, [survivor.id, absorbed.id]),
           ),
+          opts.suggestionId ? ne(candidateMergeSuggestions.id, opts.suggestionId) : undefined,
         ),
       );
 
@@ -646,7 +649,10 @@ export async function mergeCandidatesCore(opts: {
     if (!mergeRow) throw new Error("Merge record insert failed.");
 
     if (opts.suggestionId) {
-      await tx
+      // Conditional on status='pending': two reviewers deciding at once — the
+      // second one's update matches nothing and the merge aborts (verdict
+      // finding 5). The status flip and the merge share one transaction.
+      const decided = await tx
         .update(candidateMergeSuggestions)
         .set({
           status: "merged",
@@ -659,8 +665,12 @@ export async function mergeCandidatesCore(opts: {
           and(
             eq(candidateMergeSuggestions.id, opts.suggestionId),
             eq(candidateMergeSuggestions.orgId, orgId),
+            eq(candidateMergeSuggestions.status, "pending"),
           ),
-        );
+        )
+        .returning({ id: candidateMergeSuggestions.id });
+      if (decided.length === 0)
+        throw new Error("That suggestion has already been decided by someone else.");
     }
 
     // The merge may drop agent requests about the absorbed row's applications.
@@ -827,7 +837,16 @@ export async function decideSuggestion(opts: {
   if (suggestion.status !== "pending") throw new Error("That suggestion has already been decided.");
 
   if (opts.decision === "merge") {
+    // A client-supplied survivor must be one of the two suggested candidates —
+    // anything else would merge an unrelated person into the pair (verdict
+    // finding 1: merge hijack via survivorId).
     let survivorId = opts.survivorId ?? null;
+    if (
+      survivorId &&
+      survivorId !== suggestion.candidateAId &&
+      survivorId !== suggestion.candidateBId
+    )
+      throw new Error("The survivor must be one of the two suggested candidates.");
     if (!survivorId) {
       const pair = await db
         .select({ id: candidates.id, createdAt: candidates.createdAt })
@@ -863,27 +882,36 @@ export async function decideSuggestion(opts: {
     const shared = sharedTypeOf(m[1] as KeyRow["keyType"]);
     if (shared) sharedKeys.push({ keyType: shared, keyValue: r.detail });
   }
-  if (sharedKeys.length > 0) {
-    // A shared key may already be recorded for this candidate — no-op then.
-    await db
-      .insert(candidateIdentityKeys)
-      .values(sharedKeys.map((k) => ({ orgId: opts.orgId, candidateId: newcomerId, ...k })))
-      .onConflictDoNothing();
-  }
-  await db
-    .update(candidateMergeSuggestions)
-    .set({
-      status: "kept_separate",
-      decidedBy: opts.actor.userId ?? null,
-      decidedAt: new Date(),
-      decisionNote: opts.note ?? null,
-    })
-    .where(
-      and(
-        eq(candidateMergeSuggestions.id, opts.suggestionId),
-        eq(candidateMergeSuggestions.orgId, opts.orgId),
-      ),
-    );
+  // One transaction around the shared-key insert and the conditional decision
+  // update: two reviewers deciding at once — the loser's update matches no
+  // pending row and the whole decision aborts (verdict finding 5).
+  await db.transaction(async (tx) => {
+    if (sharedKeys.length > 0) {
+      // A shared key may already be recorded for this candidate — no-op then.
+      await tx
+        .insert(candidateIdentityKeys)
+        .values(sharedKeys.map((k) => ({ orgId: opts.orgId, candidateId: newcomerId, ...k })))
+        .onConflictDoNothing();
+    }
+    const decided = await tx
+      .update(candidateMergeSuggestions)
+      .set({
+        status: "kept_separate",
+        decidedBy: opts.actor.userId ?? null,
+        decidedAt: new Date(),
+        decisionNote: opts.note ?? null,
+      })
+      .where(
+        and(
+          eq(candidateMergeSuggestions.id, opts.suggestionId),
+          eq(candidateMergeSuggestions.orgId, opts.orgId),
+          eq(candidateMergeSuggestions.status, "pending"),
+        ),
+      )
+      .returning({ id: candidateMergeSuggestions.id });
+    if (decided.length === 0)
+      throw new Error("That suggestion has already been decided by someone else.");
+  });
   void writeMergeAudit(
     opts.actor,
     opts.orgId,
@@ -921,4 +949,21 @@ function writeMergeAudit(
     entityId,
     detail,
   });
+}
+
+/* ------------------------------------------------------------------ roles */
+
+/**
+ * Who may decide a merge suggestion or undo a merge (verdict finding 2):
+ * the recruiter-side roles. Enforced server-side in the server functions;
+ * step-up (fresh re-authentication) is enforced separately per call.
+ */
+export async function assertMergeDecisionRole(userId: string, orgId: string): Promise<void> {
+  const { assertRole } = await import("../../lib/auth.middleware");
+  await assertRole(
+    userId,
+    orgId,
+    ["recruiter", "hr_head", "president_cbo"],
+    "Only recruiters and HR leadership can merge or undo candidates.",
+  );
 }

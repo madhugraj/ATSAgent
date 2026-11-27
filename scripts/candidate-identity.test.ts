@@ -32,12 +32,15 @@ const {
   candidateMergeSuggestions,
   candidateMerges,
   candidates,
+  orgMembers,
   organizations,
   requisitions,
+  userRoles,
   users,
 } = await import("../drizzle/schema");
 const norm = await import("../src/lib/candidates/identity-normalise");
 const identity = await import("../src/server/candidates/identity.server");
+const stepUp = await import("../src/server/step-up");
 
 const stamp = Date.now();
 const dom = `ci-${stamp}.test`;
@@ -554,5 +557,120 @@ describe("merge and undo", () => {
     });
     expect(outcome.outcome).toBe("review");
     expect(outcome.reasons[0]?.signal).toBe("shared_key:shared_email");
+  });
+});
+
+describe("decision guards (verdict 114 blockers)", () => {
+  const memberUsers: string[] = [];
+
+  async function mkMember(email: string, opts: { role?: string; isOwner?: boolean } = {}) {
+    const id = (await db.insert(users).values({ email }).returning({ id: users.id }))[0]!.id;
+    await db.insert(orgMembers).values({
+      orgId: orgA,
+      userId: id,
+      email,
+      status: "active",
+      isOwner: opts.isOwner ?? false,
+    } as never);
+    if (opts.role)
+      await db.insert(userRoles).values({ userId: id, orgId: orgA, role: opts.role } as never);
+    memberUsers.push(id);
+    return id;
+  }
+
+  afterAll(async () => {
+    for (const id of memberUsers) {
+      await db.delete(orgMembers).where(eq(orgMembers.userId, id));
+      await db.delete(userRoles).where(eq(userRoles.userId, id));
+      await db.delete(users).where(eq(users.id, id));
+    }
+  });
+
+  test("a client-supplied survivor outside the pair is refused (merge hijack)", async () => {
+    const a = await mkCandidate(orgA, { fullName: "Pair A", email: `pair-a-${stamp}@${dom}` });
+    const b = await mkCandidate(orgA, { fullName: "Pair B", email: `pair-b-${stamp}@${dom}` });
+    const outsider = await mkCandidate(orgA, {
+      fullName: "Outsider",
+      email: `outsider-${stamp}@${dom}`,
+    });
+    const suggestion = await identity.enqueueMergeSuggestion({
+      orgId: orgA,
+      existingId: a.id,
+      newcomerId: b.id,
+      score: 1,
+      reasons: [{ signal: "strong_key:email", detail: `shared-${stamp}@${dom}` }],
+    });
+    expect(suggestion).not.toBeNull();
+    expect(
+      async () =>
+        await identity.decideSuggestion({
+          orgId: orgA,
+          suggestionId: suggestion!.id,
+          decision: "merge",
+          survivorId: outsider.id,
+          actor,
+        }),
+    ).toThrow(/survivor must be one of the two/);
+    // Nothing merged: all three rows still exist and no tombstone was set.
+    const after = await db.select().from(candidates).where(eq(candidates.orgId, orgA));
+    for (const row of [a, b, outsider]) {
+      const current = after.find((r) => r.id === row.id)!;
+      expect(current.mergedIntoId).toBeNull();
+    }
+    const [stillPending] = await db
+      .select()
+      .from(candidateMergeSuggestions)
+      .where(eq(candidateMergeSuggestions.id, suggestion!.id));
+    expect(stillPending.status).toBe("pending");
+    // Decide properly to leave a clean state.
+    await identity.decideSuggestion({
+      orgId: orgA,
+      suggestionId: suggestion!.id,
+      decision: "keep_separate",
+      actor,
+    });
+  });
+
+  test("only recruiter-side roles decide or undo; step-up needs a fresh re-authentication", async () => {
+    const owner = await mkMember(`merge-owner@${dom}`, { isOwner: true });
+    const recruiter = await mkMember(`merge-recruiter@${dom}`, { role: "recruiter" });
+    const manager = await mkMember(`merge-manager@${dom}`, { role: "hiring_manager" });
+    await expect(identity.assertMergeDecisionRole(owner, orgA)).resolves.toBeUndefined();
+    await expect(identity.assertMergeDecisionRole(recruiter, orgA)).resolves.toBeUndefined();
+    await expect(identity.assertMergeDecisionRole(manager, orgA)).rejects.toThrow(
+      /Only recruiters and HR leadership/,
+    );
+    // Server-side step-up: a session with no recent re-authentication is refused.
+    await expect(stepUp.assertStepUp(manager, new Request("http://localhost/"))).rejects.toThrow(
+      /Confirm your password/,
+    );
+  });
+
+  test("a suggestion decided twice loses the race: the loser is refused", async () => {
+    const a = await mkCandidate(orgA, { fullName: "Race A", email: `race-a-${stamp}@${dom}` });
+    const b = await mkCandidate(orgA, { fullName: "Race B", email: `race-b-${stamp}@${dom}` });
+    const suggestion = await identity.enqueueMergeSuggestion({
+      orgId: orgA,
+      existingId: a.id,
+      newcomerId: b.id,
+      score: 1,
+      reasons: [{ signal: "strong_key:email", detail: `race-${stamp}@${dom}` }],
+    });
+    expect(suggestion).not.toBeNull();
+    await identity.decideSuggestion({
+      orgId: orgA,
+      suggestionId: suggestion!.id,
+      decision: "keep_separate",
+      actor,
+    });
+    expect(
+      async () =>
+        await identity.decideSuggestion({
+          orgId: orgA,
+          suggestionId: suggestion!.id,
+          decision: "keep_separate",
+          actor,
+        }),
+    ).toThrow(/already been decided/);
   });
 });
