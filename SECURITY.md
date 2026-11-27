@@ -464,3 +464,14 @@ mandatory document type has been validated.
 - Merges keep the stricter of the two records' pool-use, consent and AI-call opt-out.
 - Erasure deletes every stored CV version file, every claim, and any record merged into
   the erased person (tombstones), so no copy of their CV survives.
+
+## Archive import (Candidate Identification A3)
+
+- Zip archives are unpacked in the recruiter's browser; the server only ever receives
+  individual PDF/DOCX/TXT/RTF files (≤15 MB each), never an archive to expand.
+- Text is extracted in the sandboxed parser service, exactly like other CV intake.
+- Staged files hold personal data with no owning candidate: each is deleted when its item
+  reaches a terminal state, and a finished or cancelled import deletes its whole staging
+  prefix. Trial runs keep only counts and hashed identity keys, never file bytes or
+  contact details.
+- Issues CSV cells are escaped against spreadsheet formula injection.

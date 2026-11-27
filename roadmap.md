@@ -45,6 +45,16 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       them; merges move versions and claims and keep the stricter consent / pool-use;
       erasure removes every version file and any record merged into the person; existing
       CVs are backfilled as versions without AI calls (extraction is opt-in per candidate)
+- [x] A3: archive import (Candidates → Archive import): zip archives are unpacked in the
+      browser, files staged in batches, then processed by the `/api/public/cv-processing`
+      tick through the intake core (identity, versions, claims queue) with leases, ≤3
+      attempts, spend-cap deferral, and per-file status (new / merged / review / already
+      held / failed) plus an issues CSV; trial runs read a sample (default 250) without
+      creating candidates and report parse quality, duplicate rate and AI tokens per CV;
+      re-runs are idempotent (file hash); staged files are deleted at every terminal state
+      and the import prefix is swept when it finishes. Deferred: OCR for scanned files
+      (unreadable files are listed), per-version retention (keep everything until a tenant
+      sets a period), the scheduled file-drop pull channel
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 

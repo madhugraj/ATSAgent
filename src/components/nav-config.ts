@@ -34,6 +34,7 @@ import {
   FileStack,
   Users,
   Waypoints,
+  Upload,
 } from "lucide-react";
 
 import type { Capability } from "@/lib/capabilities";
@@ -243,6 +244,15 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/candidates",
         label: "Talent pool",
         icon: Users,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
+        cap: "matching.pool",
+        mode: "manual",
+      },
+      {
+        to: "/candidates/import",
+        label: "Archive import",
+        icon: Upload,
         show: (c) =>
           c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
         cap: "matching.pool",
