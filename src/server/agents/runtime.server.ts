@@ -2919,6 +2919,30 @@ export async function cancelStaleRequests(
     )
     .returning({ id: agentTasks.id, runId: agentTasks.runId });
   closed.push(...decisions);
+  // A stand-in proposed for the round the candidate has just left: that round is over.
+  const standIns = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      response: {
+        status: "cancelled",
+        reason: `the candidate moved from ${fromStage} to ${toStage}, so a stand-in for that round no longer applies.`,
+      } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'panel_substitute'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+        sql`'l' || (${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level') = ${fromStage}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  closed.push(...standIns);
   for (const t of closed) {
     await writeAudit({
       actor: "system:stage-change",
