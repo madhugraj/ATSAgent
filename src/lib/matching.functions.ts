@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, matchScores, socialProfiles, sourceIntegrations } from "@db/schema";
 import { requireIdentity, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { aiJson, INJECTION_RULES, untrusted, type AiConfig } from "./ai-gateway.server";
 import { normaliseAdvice, type WeightAdvice } from "./weight-advice";
 import {
@@ -113,7 +114,7 @@ export const generateJdCore = createServerOnlyFn(async function generateJdCore(
 });
 
 export const generateJd = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => JdInput.parse(data))
   .handler(async ({ data, context }) => generateJdCore(context.orgId, data));
 
@@ -129,7 +130,7 @@ const JdImportInput = z.object({
  * same shape as an AI-drafted JD so scoring, must-have coverage and audit stay identical.
  */
 export const importJd = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => JdImportInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<
@@ -356,7 +357,7 @@ export const suggestWeightsCore = createServerOnlyFn(async function suggestWeigh
 });
 
 export const suggestWeights = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => WeightAdviceInput.parse(data))
   .handler(async ({ data, context }): Promise<WeightAdvice> =>
     suggestWeightsCore(context.orgId, data),
@@ -420,7 +421,7 @@ export const draftLinkedinPostCore = createServerOnlyFn(async function draftLink
 });
 
 export const draftLinkedinPost = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => PostInput.parse(data))
   .handler(async ({ data, context }) => draftLinkedinPostCore(context.orgId, data));
 
@@ -480,7 +481,7 @@ const MatchInput = z.object({
 });
 
 export const matchJdToCv = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => MatchInput.parse(data))
   .handler(async ({ data, context }) => {
     const { model: _model, ...wire } = await scoreCandidate({
@@ -522,7 +523,7 @@ export type PipelineRowResult =
  * resume never kills the whole run.
  */
 export const matchPipeline = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => PipelineInput.parse(data))
   .handler(async ({ data, context }): Promise<PipelineRowResult[]> =>
     mapWithConcurrency(data.rows, data.concurrency, async (row) => {
@@ -550,7 +551,7 @@ export const matchPipeline = createServerFn({ method: "POST" })
 const ParseInput = z.object({ resumeText: z.string().min(20) });
 
 export const parseResume = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => ParseInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<{
@@ -588,7 +589,7 @@ const AiInterviewInput = z.object({
 });
 
 export const runAiScreening = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => AiInterviewInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<{
@@ -614,7 +615,7 @@ export const runAiScreening = createServerFn({ method: "POST" })
 
 /** Enabled naukri/indeed boards for the caller's org, for the import picker. */
 export const listEnabledJobBoards = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .handler(async ({ context }) => {
     return db
       .select({
@@ -683,7 +684,7 @@ const PersistInput = z.object({
  * shortlisted promotion. Single-score and bulk-pipeline runs share this.
  */
 export const persistMatchResult = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => PersistInput.parse(data))
   .handler(async ({ data, context }) => {
     const [application] = await db
@@ -794,7 +795,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
 
 /** Record the recruiter's verdict over the AI recommendation, with a reason. */
 export const saveRecruiterOverride = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z
       .object({

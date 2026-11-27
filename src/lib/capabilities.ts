@@ -288,3 +288,101 @@ export const TOOL_EXEMPT: ReadonlySet<string> = new Set([
   // for them (any capability area); it writes no record of its own.
   "remind_member",
 ]);
+
+/* ------------------------------------------------ server-fn capability map */
+
+/**
+ * Per MODULE capability assignment for tenant-scoped server functions
+ * (B1b, design note §1.5/§1.8). `null` = reviewed exemption: the module is
+ * governance-role-gated, cross-cutting, or shares files with public/integration
+ * paths — its existing auth stays as-is, and it must never gain a capability.
+ * A capability means: every tenant-scoped server fn of that module's gated
+ * surface composes `requireCapability(<cap>)` AFTER its existing middleware.
+ * Mixed modules (some fns gated, some public) attach the capability only to
+ * the gated surface's fns — stricter than needed is fine, looser never is.
+ * The completeness sweep (scripts/capability-completeness.test.ts) enforces
+ * both directions.
+ */
+export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
+  // Pipeline — requisitions & JD.
+  "requisitions.functions.ts": "pipeline.requisitions",
+  "lifecycle.functions.ts": "pipeline.requisitions",
+  "role-hiring-manager.functions.ts": "pipeline.requisitions",
+  "role-profile.functions.ts": "pipeline.requisitions",
+  // Matching — pool & shortlist.
+  "matching.functions.ts": "matching.pool",
+  "candidates.functions.ts": "matching.pool",
+  "resume.functions.ts": "matching.pool",
+  "intake.functions.ts": "matching.pool",
+  "dedupe.functions.ts": "matching.pool",
+  // Screening.
+  "screening.functions.ts": "recruiting.screening",
+  "screening-queue.functions.ts": "recruiting.screening",
+  "screening-rationale.functions.ts": "recruiting.screening",
+  "assessment.functions.ts": "recruiting.screening",
+  // Voice.
+  "phone-screening.functions.ts": "recruiting.voice",
+  "screening-calls.functions.ts": "recruiting.voice",
+  "call-reviews.functions.ts": "recruiting.voice",
+  // Interviews.
+  "interviews.functions.ts": "recruiting.interviews",
+  "interview-plan.functions.ts": "recruiting.interviews",
+  "interview-confirmations.functions.ts": "recruiting.interviews",
+  "interviewers.functions.ts": "recruiting.interviews",
+  "panels.functions.ts": "recruiting.interviews",
+  "panelists.functions.ts": "recruiting.interviews",
+  "meetings.functions.ts": "recruiting.interviews",
+  // Offers.
+  "offers.functions.ts": "recruiting.offers",
+  "offer-check.functions.ts": "recruiting.offers",
+  // Sourcing / distribution (local-inbox: gate the inbox fns, not integrations).
+  "boards.functions.ts": "sourcing.distribution",
+  "distribution.functions.ts": "sourcing.distribution",
+  "local-inbox.functions.ts": "sourcing.distribution",
+  // Insights.
+  "hiring-cost.functions.ts": "insights.reports",
+  // Offers (pre-onboarding dialog serves the offers route).
+  "onboarding.functions.ts": "recruiting.offers",
+  // Reviewed exemptions — governance-role-gated, cross-cutting, or sharing
+  // files with public/integration paths; existing auth stays as-is.
+  "agents.functions.ts": null, // Agent admin (governance nav group)
+  "agent-governance.functions.ts": null,
+  "agent-intelligence.functions.ts": null,
+  "agents-observability.functions.ts": null,
+  "agents-telemetry.functions.ts": null,
+  "panel-agent.functions.ts": null, // silent-panel settings (governance)
+  "ai-settings.functions.ts": null, // Integrations (governance)
+  "email-brand.functions.ts": null,
+  "email-settings.functions.ts": null,
+  "integrations.functions.ts": null,
+  "integrations-oauth.functions.ts": null,
+  "linkedin.functions.ts": null, // integration + public callback
+  "hrms.functions.ts": null,
+  "collect.functions.ts": null, // public collection links
+  "verification.functions.ts": null, // public candidate sync shares this module
+  "negotiation.functions.ts": null, // public candidate link /negotiate/:token
+  "compensation.functions.ts": null, // public candidate link /pay/:token
+  "master.functions.ts": null, // Masters (governance)
+  "org-profile.functions.ts": null, // Organisation profile (governance)
+  "org-agreements.functions.ts": null, // governance
+  "org-context.functions.ts": null, // org profile reads (agents + governance)
+  "org-ontology.functions.ts": null, // Talent Brain / ontology (governance)
+  "org-workflows.functions.ts": null, // /w/:id — grant-gated server-side already
+  "pay-settings.functions.ts": null, // pay conventions gate (governance)
+  "labour-policy.functions.ts": null, // cross-cutting policy sources
+  "templates.functions.ts": null, // Content templates (governance)
+  "training.functions.ts": null, // training settings (governance)
+  "capture.functions.ts": null, // consent-gated capture + public token paths
+  "step-up.functions.ts": null, // auth infrastructure
+  "nudges.functions.ts": null, // cross-cutting notifications
+  "hr-performance.functions.ts": null, // dashboard surface (exempt)
+  "queries.functions.ts": null, // hiring-desk queries (desk = any-capability)
+  "hiring-desk.functions.ts": null, // desk (any-capability; tools gate per call)
+  "copilot.functions.ts": null, // copilot (any-capability; tools gate per call)
+  "org-desk.functions.ts": null, // desk (any-capability)
+  "workflow-profile.functions.ts": null, // the capability read itself + governance settings
+  "hiring-oversight.functions.ts": null, // cross-cutting oversight reads: exempt dashboard + gated pages
+  "salary-benchmark.functions.ts": null, // benchmark reads shared by dashboard and requisition pages
+  "market.functions.ts": null, // market benchmark reads shared by dashboard and requisition pages
+  "comp-knowledge.functions.ts": null, // comp knowledge reads shared by dashboard and requisition pages
+};

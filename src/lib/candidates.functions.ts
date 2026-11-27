@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { candidates, applications, requisitions } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 /**
  * Permanently delete candidates and everything attached to them:
@@ -14,7 +15,7 @@ import { assertRole, requireOrg } from "./auth.middleware";
  * capture_events has a restrictive FK, so its candidate link is cleared first.
  */
 export const deleteCandidates = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data) =>
     z.object({ candidateIds: z.array(z.string().uuid()).min(1).max(100) }).parse(data),
   )
@@ -42,7 +43,7 @@ export const deleteCandidates = createServerFn({ method: "POST" })
  * cross-tenant id simply is not found.
  */
 export const attachApplication = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) =>
     z
       .object({
@@ -116,7 +117,7 @@ const CreateCandidateInput = z.object({
  * stay non-fatal.
  */
 export const createCandidate = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => CreateCandidateInput.parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db

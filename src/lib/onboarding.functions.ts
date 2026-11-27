@@ -13,6 +13,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidates, offers, onboardingDocuments, requisitions } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { writeAudit } from "../server/audit";
 import {
   compensationReading,
@@ -59,7 +60,7 @@ export type OnboardingDocWire = {
 
 /** The document catalogue the UI renders — labels, hints and what is mandatory. */
 export const listDocTypes = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .handler(async () => DOC_TYPES);
 
 const toWire = createServerOnlyFn(function toWire(
@@ -100,7 +101,7 @@ function base64ToBytes(data: string): Uint8Array {
 
 /** Every document filed against one application, newest first, with readiness. */
 export const listOnboardingDocs = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
   .handler(
     async ({ data, context }): Promise<{ docs: OnboardingDocWire[]; readiness: Readiness }> => {
@@ -123,7 +124,7 @@ export const listOnboardingDocs = createServerFn({ method: "POST" })
 
 /** Pre-onboarding progress for every live offer, for the offers register. */
 export const listOnboardingReadiness = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .handler(async ({ context }): Promise<Readiness[]> => {
     const live = await db
       .select({ applicationId: offers.applicationId })
@@ -165,7 +166,7 @@ export const listOnboardingReadiness = createServerFn({ method: "GET" })
 
 /** Upload one document and read it with the organisation's own AI key. */
 export const uploadOnboardingDoc = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z
       .object({
@@ -243,7 +244,7 @@ export const uploadOnboardingDoc = createServerFn({ method: "POST" })
 
 /** Re-run the extraction agent on a stored document (after a clearer copy, or a key change). */
 export const reextractOnboardingDoc = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
@@ -374,7 +375,7 @@ export const reviewOnboardingDocCore = createServerOnlyFn(async function reviewO
 });
 
 export const reviewOnboardingDoc = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z
       .object({
@@ -393,7 +394,7 @@ export const reviewOnboardingDoc = createServerFn({ method: "POST" })
 
 /** Delete a wrongly filed document and its stored file. */
 export const deleteOnboardingDoc = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await assertRole(
@@ -435,7 +436,7 @@ export const deleteOnboardingDoc = createServerFn({ method: "POST" })
  * page beside the agent's reading. Private storage is never exposed directly.
  */
 export const getOnboardingDocFile = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
@@ -463,7 +464,7 @@ export const getOnboardingDocFile = createServerFn({ method: "POST" })
 
 /** Candidates with a live offer, for the pre-onboarding worklist. */
 export const listPreOnboardingQueue = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .handler(async ({ context }) => {
     const rows = await db
       .select({
@@ -502,7 +503,7 @@ export const listPreOnboardingQueue = createServerFn({ method: "GET" })
  * a dated conclusion with its basis, evidence chain, conflicts and open gaps.
  */
 export const getCompensationReading = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }): Promise<CompensationReading> => {
     return compensationReading(context.orgId, data.applicationId);

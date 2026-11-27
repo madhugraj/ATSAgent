@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { sourceIntegrations } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 export type MeetingProviderRow = {
   id: string;
@@ -17,7 +18,7 @@ export type MeetingProviderRow = {
 
 /** Meeting providers the HR admin has configured on the Integrations page. */
 export const meetingProviders = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .handler(async ({ context }): Promise<MeetingProviderRow[]> => {
     const rows = await db
       .select({
@@ -90,6 +91,6 @@ export const createMeetingLinkCore = createServerOnlyFn(async function createMee
 });
 
 export const createMeetingLink = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => CreateInput.parse(data))
   .handler(async ({ data, context }) => createMeetingLinkCore(context.orgId, data));

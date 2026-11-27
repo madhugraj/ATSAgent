@@ -10,6 +10,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidates, offers, organizations, requisitions } from "@db/schema";
 import { assertRole, requireOrg, requireRole, type AppRole } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { resolveAiConfig, aiJson } from "./ai-gateway.server";
 import { resolveTemplate, stripUnreplacedPlaceholders } from "./templates.server";
 
@@ -101,7 +102,7 @@ export const createOfferCore = createServerOnlyFn(async function createOfferCore
 });
 
 export const createOffer = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z
       .object({
@@ -359,7 +360,7 @@ export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCo
 });
 
 export const advanceOffer = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z
       .object({
@@ -516,7 +517,7 @@ export const sendBackOfferCore = createServerOnlyFn(async function sendBackOffer
 });
 
 export const sendBackOffer = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
   )
@@ -621,7 +622,7 @@ export type EditableOfferLetter = z.infer<typeof EditableOfferLetter>;
  * remains exactly what preview and PDF render.
  */
 export const updateOfferLetter = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z.object({ offerId: z.string().uuid(), letter: EditableOfferLetter }).parse(data),
   )
@@ -697,7 +698,7 @@ const LETTER_LOCKED_STATUSES = new Set(["released", "accepted", "declined", "rev
  * offer itself must be revoked instead.
  */
 export const deleteOfferLetter = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z.object({ offerId: z.string().uuid(), reason: z.string().trim().min(8).max(400) }).parse(data),
   )
@@ -909,7 +910,7 @@ export const generateOfferLetterCore = createServerOnlyFn(async function generat
 });
 
 export const generateOfferLetter = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((data: unknown) =>
     z
       .object({

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidateAssessments, candidates, requisitions } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { generateQuestions, scoreAnswers, type AssessmentQuestion } from "./assessment.server";
 
 /* ------------------------------------------------------------ recruiter side */
@@ -124,7 +125,7 @@ export const createAssessmentCore = createServerOnlyFn(async function createAsse
 });
 
 export const createAssessment = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) => CreateInput.parse(data))
   .handler(async ({ data, context }) => createAssessmentCore(context.orgId, data));
 
