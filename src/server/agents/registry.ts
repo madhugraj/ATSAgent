@@ -71,6 +71,7 @@ export type GateKind =
   | "screening_decision"
   | "hiring_decision"
   | "panel_approval"
+  | "round_addition"
   | "panel_substitute"
   | "panel_review"
   | "new_panelist"

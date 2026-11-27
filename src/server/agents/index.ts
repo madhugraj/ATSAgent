@@ -18,6 +18,7 @@ import {
 import { registerPhase1Tools } from "./tools";
 import { registerPhase2Tools } from "./tools-phase2";
 import { registerPhase3Tools } from "./tools-phase3";
+import { registerRoundTools } from "./round-gate.server";
 import { registerPhase4Tools } from "./tools-phase4";
 import { registerSourcingTools } from "./tools-sourcing";
 import { registerDistributionTools } from "./tools-distribution";
@@ -38,6 +39,7 @@ export function ensureAgentsRegistered(): void {
   registerPhase1Tools();
   registerPhase2Tools();
   registerPhase3Tools();
+  registerRoundTools();
   registerPhase4Tools();
   registerSourcingTools();
   registerDistributionTools();

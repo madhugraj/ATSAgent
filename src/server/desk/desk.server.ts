@@ -1539,7 +1539,10 @@ export async function onTaskOpened(
                       : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
                             ?.args?.subject?.type === "panel_review"
                         ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
-                        : "This needs a decision."
+                        : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                              ?.args?.subject?.type === "round_addition"
+                          ? "Another interview round, drafted from the earlier rounds' feedback — edit it and approve, or decline."
+                          : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1567,6 +1570,7 @@ export async function onTaskOpened(
                 level?: number;
                 memberIds?: string[];
                 needed?: string;
+                round?: { name: string; focus: string; competencies: string[] };
               };
             };
           } | null
@@ -1580,6 +1584,7 @@ export async function onTaskOpened(
             level: subj.level,
             memberIds: subj.memberIds,
           };
+        if (subj.type === "round_addition") return { subjectType: subj.type, round: subj.round };
         if (subj.type === "new_panelist")
           return { subjectType: subj.type, level: subj.level, needed: subj.needed };
         return subj.type === "screening_decision"
@@ -1693,9 +1698,19 @@ export async function taskDeciders(
 export async function taskStatuses(orgId: string, ids: string[]): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const rows = await db
-    .select({ id: agentTasks.id, status: agentTasks.status, response: agentTasks.response })
+    .select({
+      id: agentTasks.id,
+      runId: agentTasks.runId,
+      status: agentTasks.status,
+      response: agentTasks.response,
+      action: agentTasks.proposedAction,
+    })
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const failed = await failedApprovedCalls(
+    orgId,
+    rows.filter((r) => r.status === "approved"),
+  );
   return Object.fromEntries(
     rows.map((r) => [
       r.id,
@@ -1704,9 +1719,42 @@ export async function taskStatuses(orgId: string, ids: string[]): Promise<Record
         : r.status === "cancelled" &&
             /moved from/.test(String((r.response as { reason?: string } | null)?.reason ?? ""))
           ? "stale"
-          : r.status,
+          : failed.has(r.id)
+            ? "approved_failed"
+            : r.status,
     ]),
   );
+}
+
+/**
+ * Approved tasks whose action then errored when the agent ran it: the run's
+ * transcript holds the tool result for the task's call id, marked isError.
+ */
+async function failedApprovedCalls(
+  orgId: string,
+  tasks: { id: string; runId: string | null; action: unknown }[],
+): Promise<Set<string>> {
+  const byCall = new Map<string, string>();
+  for (const t of tasks) {
+    const callId = (t.action as { toolCallId?: string } | null)?.toolCallId;
+    if (t.runId && callId) byCall.set(callId, t.id);
+  }
+  const runIds = [...new Set(tasks.map((t) => t.runId).filter((x): x is string => !!x))];
+  if (!byCall.size || !runIds.length) return new Set();
+  const runs = await db
+    .select({ transcript: agentRuns.transcript })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.orgId, orgId), inArray(agentRuns.id, runIds)));
+  const out = new Set<string>();
+  for (const run of runs)
+    for (const m of (run.transcript ?? []) as {
+      role?: string;
+      toolCallId?: string;
+      isError?: boolean;
+    }[])
+      if (m.role === "tool" && m.isError && m.toolCallId && byCall.has(m.toolCallId))
+        out.add(byCall.get(m.toolCallId)!);
+  return out;
 }
 
 /* ------------------------------------------------------------- progress */
@@ -1743,6 +1791,8 @@ export type ScreeningBoardRow = {
 export type DeskProgress = {
   /** Each screened (or shortlisted) candidate's screening, live. */
   screening?: ScreeningBoardRow[];
+  /** Each candidate who reached an interview: their rounds, hand-overs and who has them now. */
+  interviews?: import("./interview-board.server").InterviewBoardRow[];
   /** The requisition was closed, rejected or deleted — the journey has ended. */
   ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
   stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
@@ -1840,6 +1890,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         count(*) filter (where m.id is not null)::int scored,
         count(*) filter (where a.stage in ('l1','l2','l3','offer','offer_pending','offer_released','offer_accepted','hired','joined','joining_deferred'))::int interviewing,
         count(*) filter (where a.stage = 'joined')::int joined,
+        count(*) filter (where a.stage in ('l1','l2','l3'))::int in_rounds,
         (select count(*) from evaluations e join applications a2 on a2.id = e.application_id
           where a2.requisition_id = ${conv.requisitionId} and e.org_id = ${orgId})::int evaluations,
         (select count(*) from offers o join applications a3 on a3.id = o.application_id
@@ -1852,6 +1903,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       scored: number;
       interviewing: number;
       joined: number;
+      in_rounds: number;
       evaluations: number;
       offers: number;
       released: number;
@@ -1881,7 +1933,8 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     if (jd === "approved") done.add("jd");
     if ((c?.scored ?? 0) > 0) done.add("candidates");
     if ((c?.interviewing ?? 0) > 0) done.add("screening");
-    if ((c?.evaluations ?? 0) > 0) done.add("interviews");
+    // Interviews stay the current step while anyone is still in a round.
+    if ((c?.evaluations ?? 0) > 0 && !(c?.in_rounds ?? 0)) done.add("interviews");
     if ((c?.offers ?? 0) > 0) done.add("decision");
     if ((c?.released ?? 0) > 0) done.add("offer");
     if ((c?.joined ?? 0) > 0) done.add("joining");
@@ -1906,7 +1959,27 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   });
   // The screening board stays with the Screening step after the first candidate moves on.
   const screening = conv.requisitionId ? await screeningBoard(conv.orgId, conv.requisitionId) : [];
-  const board = screening.length ? { screening } : {};
+  const tz = await orgTimeZone(conv.orgId);
+  const interviewRows = conv.requisitionId
+    ? await (
+        await import("./interview-board.server")
+      ).interviewBoard(conv.orgId, conv.requisitionId, {
+        agentTitle: (t) => AGENT_TITLE[t] ?? t,
+        when: (d) =>
+          d.toLocaleString("en-IN", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: tz,
+          }),
+      })
+    : [];
+  const board = {
+    ...(screening.length ? { screening } : {}),
+    ...(interviewRows.length ? { interviews: interviewRows } : {}),
+  };
   if (current === null) return { stages, next: null, ...board };
   const cur: StageKey = current;
 

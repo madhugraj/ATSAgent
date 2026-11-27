@@ -85,6 +85,7 @@ const GATE_LABEL: Record<string, string> = {
   screening_decision: "Screening decision",
   hiring_decision: "Hiring decision",
   panel_approval: "Panel approval",
+  round_addition: "Another interview round",
   panel_substitute: "Panel stand-in",
   org_profile: "Organisation profile",
   expert_brief: "Expert brief",

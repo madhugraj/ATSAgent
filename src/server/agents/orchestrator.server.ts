@@ -425,17 +425,24 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       finalRound?: boolean;
       policy?: string;
       heldForPanelReview?: boolean;
+      /** Sent again once the HR head went with the panel after a disagreement. */
+      afterPanelReview?: { agentVerdict: string; agentRating: number | null };
     };
     // Under the "immediate" policy the round's verdict already moved the
-    // candidate: nobody is asked for a hiring decision.
+    // candidate: nobody is asked for a hiring decision. A disagreement held
+    // for the HR head's panel review asks for nothing until that review.
     const due =
+      !p.heldForPanelReview &&
       p.policy !== "immediate" &&
       (p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject");
+    const dissent = p.afterPanelReview
+      ? ` The round's panel agent disagreed (its view: ${p.afterPanelReview.agentVerdict}${p.afterPanelReview.agentRating == null ? "" : `, ${p.afterPanelReview.agentRating}/5`}); the HR head reviewed it and went with the panel — say so in the request.`
+      : "";
     await dispatch(
       "evaluation",
       `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
         due
-          ? " and ask the hiring manager for the hiring decision."
+          ? ` and ask the hiring manager for the hiring decision.${dissent}`
           : p.heldForPanelReview
             ? ". The move is on hold: the round's panel agent disagrees with the panel and the HR head reviews it. Write the debrief only — do not request a hiring decision."
             : p.policy === "immediate"

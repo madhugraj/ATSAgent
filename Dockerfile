@@ -25,5 +25,11 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
 COPY --from=build /app/.output ./.output
+# Fail the build if the bundle imports a package that is not in the image
+# (only .output is copied here), instead of a 500 on the first request.
+COPY --from=build /app/scripts/check-bundle-imports.mjs /tmp/check-bundle-imports.mjs
+RUN node --experimental-import-meta-resolve /tmp/check-bundle-imports.mjs \
+      .output/server .output/voice-worker .output/parser-worker \
+    && rm /tmp/check-bundle-imports.mjs
 EXPOSE 3000
 CMD ["node", ".output/server/index.mjs"]

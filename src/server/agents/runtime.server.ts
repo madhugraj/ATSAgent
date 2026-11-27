@@ -240,6 +240,7 @@ type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects
 type PolicyFindingSubject = { type: "policy_finding"; findingId: string; expects?: string };
 type PolicyBriefingSubject = { type: "policy_briefing"; briefingId: string; expects?: string };
 type GateSubject =
+  | import("./round-gate.server").RoundAdditionSubject
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
@@ -456,6 +457,10 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     };
   }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "round_addition") {
+    const { roundGateFor } = await import("./round-gate.server");
+    return roundGateFor(orgId, subject);
+  }
   if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "new_panelist") return newPanelistGateFor(orgId, subject);
@@ -850,6 +855,10 @@ async function performGate(
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "round_addition") {
+    const { performRoundGate } = await import("./round-gate.server");
+    return performRoundGate(orgId, actor, subject, decision);
+  }
   if (subject.type === "expert_brief")
     return performExpertBriefGate(orgId, userId, subject, decision);
   if (subject.type === "panel_review") {
@@ -2570,6 +2579,10 @@ async function applyDecision(
       return told(`${await approvedPanelWords(task.orgId, subject)}${comment}`);
     if (subject?.type === "new_panelist")
       return told(`${await newPanelistWords(task.orgId, task.id)}${comment}`);
+    if (subject?.type === "round_addition") {
+      const { roundAddedWords } = await import("./round-gate.server");
+      return told(`${await roundAddedWords(task.orgId, subject)}${comment}`);
+    }
     return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.
@@ -2942,6 +2955,35 @@ export async function cancelStaleRequests(
     await requeueIfUnblocked(t.runId);
   }
   return closed.length;
+}
+
+/**
+ * A round that will not happen (called off, missed): its open stand-in
+ * requests no longer apply — closed, so the Interview coordinator can offer
+ * new times instead of waiting on them.
+ */
+export async function closeRoundRequests(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<number> {
+  const open = await db
+    .select({ id: agentTasks.id, runId: agentTasks.runId, orgId: agentTasks.orgId })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'panel_substitute'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+        sql`(${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level')::int = ${level}`,
+      ),
+    );
+  return closeTasks(
+    open as TaskRef[],
+    `The L${level} interview will not go ahead as booked; new times are being offered.`,
+    "system:round-missed",
+  );
 }
 
 /* ------------------------------------- requests that outlived their work */
