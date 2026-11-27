@@ -8,6 +8,7 @@ import { aiUsageEvents, type AiUsageStatus } from "@db/schema";
  */
 export const AI_FEATURES = [
   "resume_parse",
+  "cv_claims_extract",
   "jd_parse",
   "jd_generate",
   "jd_import",
