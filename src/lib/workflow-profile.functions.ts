@@ -58,6 +58,8 @@ export function providedSettings(input: WorkflowProfileSettingsInput): WorkflowP
   if (input.jdDuplicateLookbackDays != null)
     out.jdDuplicateLookbackDays = input.jdDuplicateLookbackDays;
   if (input.payVarianceTolerance != null) out.payVarianceTolerance = input.payVarianceTolerance;
+  // Validated above but previously dropped here, so it could never be changed.
+  if (input.profileMatchTopK != null) out.profileMatchTopK = input.profileMatchTopK;
   return out;
 }
 

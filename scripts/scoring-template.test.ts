@@ -153,3 +153,10 @@ describe("organisation scoring template", () => {
     expect((await tpl.getScoringTemplate(orgId)).isDefault).toBe(true);
   });
 });
+
+describe("workflow settings", () => {
+  test("the review depth (top K) is kept when saved", async () => {
+    const { providedSettings } = await import("../src/lib/workflow-profile.functions");
+    expect(providedSettings({ profileMatchTopK: 100 })).toEqual({ profileMatchTopK: 100 });
+  });
+});
