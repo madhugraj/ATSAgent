@@ -35,7 +35,7 @@ export type WorkflowProfileSettings = {
   payVarianceTolerance?: number;
   /** Profile matching: how many top candidates per requisition get the AI review. */
   profileMatchTopK?: number;
-  /** Profile matching: factor weights (normalised at use). */
+  /** @deprecated The ranked shortlist uses each requisition's own weights; kept so saved settings still parse. */
   profileMatchWeights?: Partial<
     Record<"must" | "nice" | "experience" | "sector" | "location", number>
   >;

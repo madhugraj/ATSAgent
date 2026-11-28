@@ -31,7 +31,8 @@ import { addApplicationsToRequisition } from "@/lib/requisitions.functions";
 import { moveStage } from "@/lib/lifecycle.functions";
 import { importCandidates } from "@/lib/integrations.functions";
 import { balanceWeights } from "@/lib/cv-extract";
-import { rankPool } from "@/lib/shortlist";
+import { rankPool, type PoolRank } from "@/lib/shortlist";
+import { getShortlistFn } from "@/lib/shortlist.functions";
 
 import {
   EmptyState,
@@ -246,15 +247,55 @@ function Matching() {
     });
   }, [apps.data, cands.data, scoreMap, results, activeId]);
 
-  /** Every unattached person in the pool, pre-ranked against this JD. */
-  const poolRanked = useMemo(() => {
+  /**
+   * The evidence ranking for this role (the same scores as its shortlist, from
+   * the requisition's weights). Absent when the role is not ranked yet or the
+   * organisation does not use the ranked shortlist.
+   */
+  const getShortlist = useServerFn(getShortlistFn);
+  const evidence = useQuery({
+    queryKey: ["shortlist", activeId, "all", "pool"],
+    queryFn: () => getShortlist({ data: { requisitionId: activeId, filter: "all", limit: 150 } }),
+    enabled: Boolean(activeId),
+    retry: false,
+  });
+
+  /** Every unattached person in the pool, ranked against this JD. */
+  const poolRanked = useMemo((): (PoolRank & { mustTotal: number; reviewed: boolean })[] => {
     if (!requisition) return [];
     const attached = new Set(pipeline.map((row) => row.app.candidate_id));
+    const byId = new Map((cands.data ?? []).map((c) => [c.id, c]));
+    const ranked = evidence.data?.rows ?? [];
+    if (ranked.length) {
+      return ranked.flatMap((row) => {
+        const candidate = byId.get(row.candidateId);
+        if (!candidate || attached.has(row.candidateId)) return [];
+        const must = row.requirements.filter((q) => q.kind === "must");
+        return [
+          {
+            candidate,
+            fit: row.score,
+            mustHits: must.filter((q) => q.verdict !== "missing").map((q) => q.requirement),
+            mustMisses: must.filter((q) => q.verdict === "missing").map((q) => q.requirement),
+            goodHits: [],
+            experienceOk: true,
+            locationOk: !row.knockouts.some((k) => k.kind === "location"),
+            mustTotal: must.length,
+            reviewed: row.reviewed,
+          },
+        ];
+      });
+    }
+    // Not ranked yet: the quick keyword pre-rank.
     return rankPool(
       (cands.data ?? []).filter((candidate) => !attached.has(candidate.id)),
       requisition,
-    );
-  }, [cands.data, pipeline, requisition]);
+    ).map((row) => ({
+      ...row,
+      mustTotal: requisition.must_have_skills.length,
+      reviewed: false,
+    }));
+  }, [cands.data, pipeline, requisition, evidence.data]);
 
   /** Only the probable CVs: above the fit floor, optionally narrowed by a keyword. */
   const suggestedPool = useMemo(() => {
@@ -746,8 +787,10 @@ function Matching() {
                             {row.candidate.full_name}
                           </div>
                           <div className="num truncate text-xs text-muted-foreground">
-                            {row.mustHits.length}/{Math.max(1, requisition.must_have_skills.length)}{" "}
-                            must-haves · {row.candidate.experience_years} yrs
+                            {row.mustTotal
+                              ? `${row.mustHits.length}/${row.mustTotal} must-haves`
+                              : "evidence only"}{" "}
+                            · {row.candidate.experience_years} yrs
                             {row.candidate.location ? ` · ${row.candidate.location}` : ""}
                           </div>
                         </div>

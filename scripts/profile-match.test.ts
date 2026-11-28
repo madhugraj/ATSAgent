@@ -5,6 +5,9 @@
  * claims; the overall score is computed in code; reruns only re-review
  * candidates whose profile changed; unapproved or unprofiled requisitions are
  * not ranked; the pool excludes merged, non-consented and role-only people.
+ * Weights are the requisition's own: skills → must/nice, experience, and
+ * career / impact / education / custom dimensions judged with verified
+ * citations; a weight change re-scores without AI, a dimension change re-reviews.
  *
  * Run: DATABASE_URL=<disposable local db> bun test scripts/profile-match.test.ts
  */
@@ -43,6 +46,12 @@ mock.module("../src/lib/ai-gateway.server", () => ({
           { id: "R1", verdict: has ? "met" : "missing", claimIds: has ? ["C1", "C99"] : [] },
           { id: "R2", verdict: "met", claimIds: ["C99"] },
         ],
+        // Every dimension: met for the e-commerce profile, citing C1 (and one invented id).
+        dimensions: Array.from(opts.prompt.matchAll(/\b(D\d+) \[dimension\]/g)).map((m) => ({
+          id: m[1],
+          verdict: has ? "met" : "missing",
+          claimIds: has ? ["C1", "C77"] : [],
+        })),
         knockouts: [],
         rationale: has ? "Strong e-commerce evidence." : "No e-commerce evidence.",
       };
@@ -228,6 +237,34 @@ describe("evidence pass", () => {
   });
 });
 
+describe("requisition weights", () => {
+  const base = { skills: 40, experience: 15, career: 10, impact: 10, education: 10, social: 15 };
+  test("skills splits into must/nice, social is redistributed, 0 switches a dimension off", () => {
+    const { weights, dimensions } = pm.weightsFromRequisition({
+      ...base,
+      impact: 0,
+      custom: [{ key: "loc", label: "Location fit", hint: "Lives near the site", weight: 5 }],
+    });
+    expect(weights["social"]).toBeUndefined();
+    expect(weights["impact"]).toBeUndefined();
+    expect(weights["must"]! / weights["nice"]!).toBeCloseTo(3);
+    expect(dimensions.map((d) => d.key)).toEqual(["career", "education", "custom:loc"]);
+    const total = Object.values(weights).reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(1);
+  });
+
+  test("a dimension change changes the stamp; a weight change does not", () => {
+    const a = pm.weightsFromRequisition({ ...base, custom: [] }).dimensions;
+    const b = pm.weightsFromRequisition({ ...base, career: 30, custom: [] }).dimensions;
+    const c = pm.weightsFromRequisition({
+      ...base,
+      custom: [{ key: "x", label: "Compliance", hint: "Regulated industry", weight: 5 }],
+    }).dimensions;
+    expect(pm.dimensionsStamp(a)).toBe(pm.dimensionsStamp(b));
+    expect(pm.dimensionsStamp(a)).not.toBe(pm.dimensionsStamp(c));
+  });
+});
+
 describe("a ranking run", () => {
   test("ranks the eligible pool, verifies citations, and re-reviews only changed profiles", async () => {
     const strong = await person("Strong One", { location: "London, UK", experienceYears: "4" }, [
@@ -263,6 +300,50 @@ describe("a ranking run", () => {
     const before = judgeCalls;
     await pm.runRequisitionMatch(orgA, reqId, { topK: 10 });
     expect(judgeCalls).toBe(before); // nothing changed, nothing re-reviewed
+  });
+
+  test("custom dimensions are judged with verified citations and weights re-score without AI", async () => {
+    const custom = [
+      { key: "mkt", label: "Marketplace", hint: "Worked on a marketplace", weight: 20 },
+    ];
+    await db
+      .update(S.requisitions)
+      .set({ customWeights: custom, weightSkills: 20 } as never)
+      .where(eq(S.requisitions.id, reqId));
+    judgeCalls = 0;
+    await pm.runRequisitionMatch(orgA, reqId, { topK: 10 });
+    expect(judgeCalls).toBeGreaterThan(0); // a new dimension re-reviews
+    const strongRow = (
+      await db
+        .select()
+        .from(S.profileMatchScores)
+        .where(eq(S.profileMatchScores.requisitionId, reqId))
+    ).find((r) => r.rationale?.includes("Strong"))!;
+    const dim = strongRow.requirements.find((q) => q.key === "custom:mkt")!;
+    expect(dim.kind).toBe("dimension");
+    expect(dim.verdict).toBe("met");
+    expect(dim.evidence).toHaveLength(1); // C77 was invented
+    expect(strongRow.factors.find((f) => f.key === "custom:mkt")?.label).toBe("Marketplace");
+    const before = strongRow.overallScore;
+
+    // Weight-only change: re-scored from the saved verdicts, no AI call.
+    await db
+      .update(S.requisitions)
+      .set({ customWeights: [{ ...custom[0]!, weight: 60 }] } as never)
+      .where(eq(S.requisitions.id, reqId));
+    judgeCalls = 0;
+    await pm.runRequisitionMatch(orgA, reqId, { topK: 10 });
+    expect(judgeCalls).toBe(0);
+    const [after] = await db
+      .select()
+      .from(S.profileMatchScores)
+      .where(
+        and(
+          eq(S.profileMatchScores.requisitionId, reqId),
+          eq(S.profileMatchScores.candidateId, strongRow.candidateId),
+        ),
+      );
+    expect(after!.overallScore).not.toBe(before);
   });
 
   test("an unapproved requisition is not ranked", async () => {

@@ -65,6 +65,14 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       weights; reruns re-review only candidates whose profile changed; new evidence
       re-queues the organisation's requisitions. Merged, non-consented and portal-terms
       people stay out of the pool. The pool-match agent's own limits are unchanged
+- [x] Unified match weights: the ranked shortlist uses the requisition's own weights
+      (the panel and Requisition agent already set them) instead of a tenant-wide
+      factor split — skills → must/nice evidence, experience band, and career / impact /
+      education / custom dimensions judged with verified citations; 0 switches a
+      dimension off; social redistributed (no CV evidence). Weight-only changes re-score
+      from saved verdicts; dimension changes re-review; saving weights on an approved role
+      re-queues its ranking. "Probable CVs from the pool" reads the evidence ranking
+      (keyword pre-rank only before a role is ranked). No migration
 - [x] C2: Shortlists (`/shortlists`): every ranked role with pool / reviewed / shortlisted
       counts; per role, candidates in score order with factor breakdown, per-requirement
       verdicts and the CV passages behind them, knock-outs and the rationale; Shortlist /

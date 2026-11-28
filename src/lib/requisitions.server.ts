@@ -562,6 +562,11 @@ export async function saveRequisitionWeightsCore(
     entityId: id,
     detail: { code: req.code, status, before, after, ...(actor.via ? { via: actor.via } : {}) },
   });
+  // The ranked shortlist uses these weights: re-rank (only changed dimensions are re-reviewed).
+  if (status === "approved") {
+    const { requestRequisitionMatch } = await import("../server/candidates/profile-match.server");
+    await requestRequisitionMatch(actor.orgId, id);
+  }
   return { status, changed: true };
 }
 

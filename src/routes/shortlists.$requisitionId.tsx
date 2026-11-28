@@ -41,6 +41,9 @@ type Filter = (typeof FILTERS)[number][0];
 
 const FACTOR_LABEL: Record<string, string> = {
   must: "Must-haves",
+  career: "Career progression",
+  impact: "Impact",
+  education: "Education",
   nice: "Nice-to-haves",
   experience: "Experience",
   sector: "Sector",
@@ -279,7 +282,7 @@ function CandidateRow({
                   title={q.requirement}
                   className={`max-w-[18rem] truncate rounded-md border px-2 py-0.5 text-xs ${VERDICT_TONE[q.verdict]}`}
                 >
-                  {q.kind === "must" ? "" : "+ "}
+                  {q.kind === "nice" ? "+ " : ""}
                   {q.requirement}
                 </span>
               ))}
@@ -288,7 +291,7 @@ function CandidateRow({
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             {row.factors.map((f) => (
               <span key={f.key} className="num">
-                {FACTOR_LABEL[f.key] ?? f.key} {Math.round(f.score * 100)}
+                {f.label ?? FACTOR_LABEL[f.key] ?? f.key} {Math.round(f.score * 100)}
               </span>
             ))}
           </div>
