@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 // Deterministic "AI": the resume parser reads the name and email lines.
+let failParses = 0; // the next N CV reads fail (a provider timeout)
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
@@ -34,6 +35,10 @@ mock.module("../src/lib/ai-gateway.server", () => ({
     feature: string;
     schema?: { parse: (v: unknown) => unknown };
   }) => {
+    if (opts.feature === "resume_parse" && failParses > 0) {
+      failParses--;
+      return { ok: false, error: "AI request failed: The operation was aborted due to timeout" };
+    }
     const name = opts.prompt.match(/Name: ([^\n<]+)/)?.[1]?.trim() ?? null;
     const email = opts.prompt.match(/Email: ([^\s<]+)/)?.[1]?.trim() ?? null;
     const raw =
@@ -263,6 +268,40 @@ describe("trial and real import", () => {
       .where(eq(candidateArchiveItems.importId, other.id));
     expect(merged!.candidateId).toBe(item!.candidateId);
     expect(merged!.status).toBe("merged");
+  });
+
+  test("a failed CV read is retried, never saved as a placeholder candidate", async () => {
+    const imp = await mkImport(false);
+    await archive.stageArchiveFile({
+      orgId: orgA,
+      importId: imp.id,
+      fileName: "cv60.txt",
+      bytes: cv(60),
+    });
+    await db
+      .update(candidateArchiveImports)
+      .set({ status: "running", startedAt: new Date() })
+      .where(eq(candidateArchiveImports.id, imp.id));
+    failParses = 2;
+    await archive.drainArchiveImports({ limit: 5 });
+    let [item] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, imp.id));
+    expect(item!.status).toBe("pending");
+    expect(item!.candidateId).toBeNull();
+    await run(imp.id);
+    [item] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, imp.id));
+    expect(item!.status).toBe("done");
+    const [person] = await db
+      .select()
+      .from(candidates)
+      .where(eq(candidates.id, item!.candidateId!));
+    expect(person!.fullName).toBe("Person 60 Archive");
+    expect(person!.skills).toContain("Sales");
   });
 
   test("at the spend cap items are deferred without burning attempts", async () => {

@@ -33,6 +33,8 @@ import { deleteObject, deletePrefix, getObject, putObject, safeFileName } from "
 export const ARCHIVE_MAX_FILE_BYTES = 15_000_000;
 export const ARCHIVE_ALLOWED = /\.(pdf|docx|txt|rtf)$/i;
 export const ARCHIVE_MAX_ATTEMPTS = 3;
+/** A CV read that fails is almost always a provider timeout: it gets more tries. */
+export const ARCHIVE_PARSE_MAX_ATTEMPTS = 8;
 const LEASE_MS = 5 * 60_000;
 /** Text shorter than this is treated as unreadable (scanned or empty). */
 const MIN_TEXT = 80;
@@ -47,6 +49,7 @@ export const ARCHIVE_REASON = {
   type: "Unsupported file type",
   already: "Already in the talent pool",
   failed: "Could not be processed",
+  unparsed: "The CV could not be read after repeated tries; upload it again",
 } as const;
 
 export function stagedPrefix(orgId: string, importId: string): string {
@@ -288,9 +291,24 @@ async function processItem(it: Claimed): Promise<ArchiveItemStatus | "retry"> {
     return "skipped";
   }
 
-  const { ingestCandidate } = await import("@/lib/intake.server");
+  // Read the CV first: a failed read (a provider timeout) is retried, never
+  // saved as a placeholder candidate with no skills, experience or location.
+  const { ingestCandidate, parseCv } = await import("@/lib/intake.server");
+  const parsed = await parseCv(text, it.org_id);
+  if (!parsed) {
+    if (it.attempts < ARCHIVE_PARSE_MAX_ATTEMPTS) {
+      await db
+        .update(candidateArchiveItems)
+        .set({ status: "pending", leaseUntil: null, updatedAt: new Date() })
+        .where(eq(candidateArchiveItems.id, it.id));
+      return "retry";
+    }
+    await finishItem(it, "failed", { detail: ARCHIVE_REASON.unparsed });
+    return "failed";
+  }
   const res = await ingestCandidate({
     resumeText: text,
+    parsed,
     fileName: it.file_name,
     requisitionId: null,
     orgId: it.org_id,
