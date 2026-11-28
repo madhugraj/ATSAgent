@@ -88,6 +88,7 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    jsonb scoring_template "nullable"
     text pay_basis_default
     numeric hours_per_week_default
     text kinds_of_work
@@ -1620,7 +1621,7 @@ erDiagram
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
 | `org_workflow_profiles` | — | 8 | — |
-| `organizations` | Organisations & masters | 35 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 36 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |

@@ -178,6 +178,19 @@ export const organizations = pgTable(
     employeeBand: text("employee_band"),
     /** Reporting currency: what pay is normalised to across zones (docs/pay-terms-plan.md). */
     currency: text("currency").notNull().default("INR"),
+    /**
+     * Default candidate-scoring weights for new requisitions (six built-ins + up
+     * to four custom dimensions, totalling 100). Null: the platform default.
+     */
+    scoringTemplate: jsonb("scoring_template").$type<{
+      skills: number;
+      experience: number;
+      career: number;
+      impact: number;
+      education: number;
+      social: number;
+      custom: { key: string; label: string; hint: string; weight: number }[];
+    } | null>(),
     /** How pay is usually quoted when a role has no pay zone (0073). */
     payBasisDefault: text("pay_basis_default").notNull().default("annual"),
     hoursPerWeekDefault: numeric("hours_per_week_default", { precision: 5, scale: 2 })

@@ -313,11 +313,14 @@ export const shortlistCsvFn = createServerFn({ method: "POST" })
         name: candidates.fullName,
         email: candidates.email,
         location: candidates.location,
+        years: candidates.experienceYears,
         score: profileMatchScores.overallScore,
         coarse: profileMatchScores.coarseScore,
         decision: profileMatchScores.decision,
         rationale: profileMatchScores.rationale,
         requirements: profileMatchScores.requirements,
+        knockouts: profileMatchScores.knockouts,
+        factors: profileMatchScores.factors,
       })
       .from(profileMatchScores)
       .innerJoin(candidates, eq(candidates.id, profileMatchScores.candidateId))
@@ -334,22 +337,80 @@ export const shortlistCsvFn = createServerFn({ method: "POST" })
       `"${String(v ?? "")
         .replace(/"/g, '""')
         .replace(/^[=+\-@]/, "'$&")}"`;
+    // One verdict column and one evidence column per requirement and scoring
+    // dimension, in the order the role defines them (from the fullest review).
+    const columns = (
+      rows.reduce<(typeof rows)[number] | null>(
+        (m, r) => (!m || r.requirements.length > m.requirements.length ? r : m),
+        null,
+      )?.requirements ?? []
+    ).map((q) => ({ requirement: q.requirement, kind: q.kind, key: q.key }));
+    const kindLabel = { must: "Must", nice: "Nice", dimension: "Dimension" } as const;
+    const factorKeys = [...new Set(rows.flatMap((r) => r.factors.map((f) => f.key)))];
+    const factorLabel = (k: string) =>
+      rows.flatMap((r) => r.factors).find((f) => f.key === k)?.label ??
+      (
+        {
+          must: "Must-haves",
+          nice: "Nice-to-haves",
+          experience: "Experience",
+          sector: "Sector",
+          location: "Location",
+        } as Record<string, string>
+      )[k] ??
+      k;
+    const header = [
+      "rank",
+      "name",
+      "email",
+      "location",
+      "years",
+      "score",
+      "decision",
+      ...factorKeys.map((k) => `${factorLabel(k)} (factor)`),
+      "met",
+      "partial",
+      "missing",
+      ...columns.flatMap((c) => [
+        `${kindLabel[c.kind]}: ${c.requirement}`,
+        `${kindLabel[c.kind]}: ${c.requirement} — evidence`,
+      ]),
+      "knock-outs",
+      "rationale",
+    ];
     const lines = [
-      "rank,name,email,location,score,decision,met,partial,missing,rationale",
-      ...rows.map((r, i) =>
-        [
+      header.map(esc).join(","),
+      ...rows.map((r, i) => {
+        const find = (c: (typeof columns)[number]) =>
+          r.requirements.find((q) =>
+            c.key ? q.key === c.key : q.kind === c.kind && q.requirement === c.requirement,
+          );
+        return [
           i + 1,
           esc(r.name),
-          esc(r.email),
+          esc(r.email?.endsWith("@no-email.atsiq.local") ? "" : r.email),
           esc(r.location),
+          r.years ?? "",
           r.score ?? "",
           r.decision ?? "",
+          ...factorKeys.map((k) => {
+            const f = r.factors.find((x) => x.key === k);
+            return f ? Math.round(f.score * 100) : "";
+          }),
           r.requirements.filter((q) => q.verdict === "met").length,
           r.requirements.filter((q) => q.verdict === "partial").length,
           r.requirements.filter((q) => q.verdict === "missing").length,
+          ...columns.flatMap((c) => {
+            const q = find(c);
+            return [
+              esc(q ? `${q.verdict}${q.strength ? ` (${q.strength})` : ""}` : ""),
+              esc(q ? q.evidence.map((e) => e.passage).join(" | ") || q.note : ""),
+            ];
+          }),
+          esc(r.knockouts.map((k) => k.detail).join("; ")),
           esc(r.rationale),
-        ].join(","),
-      ),
+        ].join(",");
+      }),
     ];
     const { writeAudit } = await import("../server/audit");
     void writeAudit({

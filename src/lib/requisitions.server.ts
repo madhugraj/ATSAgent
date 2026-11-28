@@ -131,6 +131,9 @@ export async function createRequisitionCore(
   const year = new Date().getFullYear();
   let row: { id: string } | undefined;
   let code = "";
+  // New roles start from the organisation's scoring template (if it set one).
+  const { templateColumns } = await import("./scoring-template.server");
+  const template = await templateColumns(actor.orgId);
   for (let attempt = 0; attempt < 5 && !row; attempt++) {
     const [latest] = await db
       .select({ code: requisitions.code })
@@ -171,6 +174,7 @@ export async function createRequisitionCore(
           status: finalStatus,
           approvalTrail: trail as never,
           externalJobCode: opts.externalJobCode ?? null,
+          ...template,
         })
         .returning({ id: requisitions.id });
     } catch (e) {

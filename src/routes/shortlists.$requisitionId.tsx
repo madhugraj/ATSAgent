@@ -59,6 +59,7 @@ function ShortlistPage() {
   const { requisitionId } = Route.useParams();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<Filter>("all");
+  const [floor, setFloor] = useState(40);
   const get = useServerFn(getShortlistFn);
   const decide = useServerFn(decideShortlistFn);
   const rerank = useServerFn(rerankFn);
@@ -103,7 +104,8 @@ function ShortlistPage() {
   });
   async function exportCsv() {
     const { csv: text } = await csv({ data: { requisitionId } });
-    const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+    // BOM: Excel opens the evidence quotes as UTF-8.
+    const url = URL.createObjectURL(new Blob(["\ufeff", text], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = `${q.data?.requisition.code ?? "shortlist"}.csv`;
@@ -191,18 +193,35 @@ function ShortlistPage() {
             {label}
           </Button>
         ))}
+        <select
+          value={floor}
+          onChange={(e) => setFloor(Number(e.target.value))}
+          className="num ml-auto h-8 rounded-md border border-input bg-background px-2 text-sm"
+          aria-label="Minimum score"
+        >
+          <option value={75}>Strong ≥ 75</option>
+          <option value={60}>Probable ≥ 60</option>
+          <option value={40}>Possible ≥ 40</option>
+          <option value={0}>Everyone</option>
+        </select>
+        <span className="num text-xs text-muted-foreground">
+          {q.data?.rows.filter((r) => r.decision || r.score >= floor).length ?? 0} of{" "}
+          {q.data?.rows.length ?? 0}
+        </span>
       </div>
       {q.data?.rows.length ? (
         <ol className="space-y-3">
-          {q.data.rows.map((r) => (
-            <CandidateRow
-              key={r.candidateId}
-              row={r}
-              versionNames={q.data!.versionNames}
-              busy={decideM.isPending}
-              onDecide={(decision) => decideM.mutate({ candidateId: r.candidateId, decision })}
-            />
-          ))}
+          {q.data.rows
+            .filter((r) => r.decision || r.score >= floor)
+            .map((r) => (
+              <CandidateRow
+                key={r.candidateId}
+                row={r}
+                versionNames={q.data!.versionNames}
+                busy={decideM.isPending}
+                onDecide={(decision) => decideM.mutate({ candidateId: r.candidateId, decision })}
+              />
+            ))}
         </ol>
       ) : q.isLoading ? null : (
         <EmptyState title={busy ? "Ranking…" : "No candidates"} />

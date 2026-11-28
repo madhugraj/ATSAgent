@@ -73,6 +73,14 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       from saved verdicts; dimension changes re-review; saving weights on an approved role
       re-queues its ranking. "Probable CVs from the pool" reads the evidence ranking
       (keyword pre-rank only before a role is ranked). No migration
+- [x] Organisation scoring template (Organisation → Rules; migration 0100,
+      `organizations.scoring_template`): the HR head / CBO / owner set the default
+      six built-ins + up to four custom dimensions, validated like requisition weights
+      and audited (`org.scoring_template_changed`); new requisitions (manual, desk,
+      bulk JD import, capture) start from it; **Apply to open roles** goes through each
+      role's own weight rules (in-approval roles skipped). Shortlist CSV: one verdict and
+      one evidence column per requirement and dimension, factor scores, knock-outs;
+      shortlist page has a score floor (default ≥ 40)
 - [x] C2: Shortlists (`/shortlists`): every ranked role with pool / reviewed / shortlisted
       counts; per role, candidates in score order with factor breakdown, per-requirement
       verdicts and the CV passages behind them, knock-outs and the rationale; Shortlist /
