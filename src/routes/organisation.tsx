@@ -17,6 +17,7 @@ import {
   Phone,
   Scale,
   ScrollText,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { archiveOwnOrganization, listMembers, updateOrganization } from "@/lib/org.functions";
@@ -40,6 +41,8 @@ import { PayConventionsCard } from "@/components/PayConventionsCard";
 import { LabourPolicyCard } from "@/components/LabourPolicyCard";
 import { SilentPanelCard } from "@/components/SilentPanelCard";
 import { EmailBrandCard } from "@/components/EmailBrandCard";
+import { ScoringTemplateCard } from "@/components/ScoringTemplateCard";
+import { getScoringTemplateFn } from "@/lib/scoring-template.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -158,6 +161,8 @@ function OrganisationSettings() {
   const members = useQuery({ queryKey: ["org_members"], queryFn: () => listMembersFn({}) });
   const pay = useQuery({ queryKey: ["pay_settings"], queryFn: () => getPaySettings() });
   const labour = useQuery({ queryKey: ["labour_policy"], queryFn: () => getLabourPolicy() });
+  const getScoring = useServerFn(getScoringTemplateFn);
+  const scoring = useQuery({ queryKey: ["scoring-template"], queryFn: () => getScoring() });
   const assessment = useQuery({
     queryKey: ["assessment_policy"],
     queryFn: () => getAssessmentPolicy(),
@@ -476,6 +481,21 @@ function OrganisationSettings() {
 
       {tab === "rules" && (
         <div className="space-y-3">
+          <SettingsRow
+            icon={<SlidersHorizontal className="size-4" />}
+            title="Candidate scoring template"
+            summary={
+              scoring.data
+                ? scoring.data.isDefault
+                  ? "Platform default"
+                  : `Skills ${scoring.data.template.skills} · Experience ${scoring.data.template.experience}${scoring.data.template.custom.length ? ` · ${scoring.data.template.custom.map((d) => `${d.label} ${d.weight}`).join(" · ")}` : ""}`
+                : "…"
+            }
+            open={openRows["scoring-template"] ?? false}
+            onToggle={() => toggleRow("scoring-template")}
+          >
+            <ScoringTemplateCard />
+          </SettingsRow>
           <SettingsRow
             icon={<Scale className="size-4" />}
             title="Labour & hiring policy"

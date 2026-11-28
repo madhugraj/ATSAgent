@@ -422,6 +422,7 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
         educationRequirement: p?.education_requirement ?? null,
         experienceMin: Number(p?.experience_min ?? 0) || 0,
         experienceMax: Number(p?.experience_max ?? 0) || 0,
+        ...(await import("./scoring-template.server").then((m) => m.templateColumns(org.id))),
       })
       .returning({ id: requisitions.id });
     if (!created) throw new Error("The role could not be saved.");
