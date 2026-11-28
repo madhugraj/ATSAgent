@@ -5,10 +5,10 @@
  * only; every query is org-scoped; lifecycle changes are audited.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
-import { candidateArchiveImports } from "@db/schema";
+import { candidateArchiveImports, candidateArchiveItems } from "@db/schema";
 import { db } from "../server/db";
 import { assertRole, requireOrg, type AppRole } from "./auth.middleware";
 import { requireCapability } from "./capabilities.server";
@@ -169,6 +169,60 @@ export const cancelArchiveImportFn = createServerFn({ method: "POST" })
     const { finaliseImport } = await import("../server/candidates/archive-import.server");
     await finaliseImport(context.orgId, imp.id, "cancelled");
     await audit(context, "candidate.archive_import.cancel_requested", imp.id);
+    return { ok: true as const };
+  });
+
+/**
+ * Remove a finished trial run, or a cancelled import that created nobody, from
+ * the list. Candidates are never touched: an import that created or merged a
+ * candidate stays as the record of where they came from.
+ */
+export const removeArchiveImportFn = createServerFn({ method: "POST" })
+  .middleware([requireOrg, requireCapability("matching.pool")])
+  .validator((d: unknown) => z.object({ importId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertRole(context.userId, context.orgId, RECRUITER_SIDE);
+    const imp = await importInOrg(context.orgId, data.importId);
+    if (imp.status !== "done" && imp.status !== "cancelled")
+      throw new Error("Only a finished or cancelled import can be removed.");
+    if (!imp.trialRun) {
+      const [linked] = await db
+        .select({ id: candidateArchiveItems.id })
+        .from(candidateArchiveItems)
+        .where(
+          and(
+            eq(candidateArchiveItems.orgId, context.orgId),
+            eq(candidateArchiveItems.importId, imp.id),
+            isNotNull(candidateArchiveItems.candidateId),
+          ),
+        )
+        .limit(1);
+      if (linked)
+        throw new Error("This import brought candidates in, so it stays as their record.");
+    }
+    const { deletePrefix } = await import("../server/storage");
+    const { stagedPrefix } = await import("../server/candidates/archive-import.server");
+    await deletePrefix(stagedPrefix(context.orgId, imp.id)).catch(() => undefined);
+    await db
+      .delete(candidateArchiveItems)
+      .where(
+        and(
+          eq(candidateArchiveItems.orgId, context.orgId),
+          eq(candidateArchiveItems.importId, imp.id),
+        ),
+      );
+    await db
+      .delete(candidateArchiveImports)
+      .where(
+        and(
+          eq(candidateArchiveImports.orgId, context.orgId),
+          eq(candidateArchiveImports.id, imp.id),
+        ),
+      );
+    await audit(context, "candidate.archive_import.removed", imp.id, {
+      name: imp.name,
+      trial: imp.trialRun,
+    });
     return { ok: true as const };
   });
 
