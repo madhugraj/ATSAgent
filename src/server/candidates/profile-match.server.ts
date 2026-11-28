@@ -11,8 +11,14 @@
  * 2. Requirement review for the top K (tenant setting): one gateway call per
  *    candidate judges each requirement met / partial / missing and must cite
  *    the candidate's own claim ids as evidence. Citations are verified in code;
- *    the overall score is computed in code from the verdicts and the tenant's
- *    weights, never taken from the model.
+ *    the overall score is computed in code from the verdicts and the
+ *    requisition's weights, never taken from the model.
+ *
+ * Weights are the requisition's own (the same split the requisition page and the
+ * requisition agent set): skills scores the JD's must-haves and nice-to-haves,
+ * experience the years band, and career, impact, education and every custom
+ * dimension are judged met / partial / missing with cited claims. A weight of 0
+ * switches a dimension off; social has no evidence here and is redistributed.
  *
  * Scores are display and ranking only: nothing here moves a candidate, rejects
  * anyone or contacts anyone. Recruiters decide on the shortlist page.
@@ -40,7 +46,78 @@ import type { RequirementProfile } from "@/lib/jd-requirements";
 import { db } from "../db";
 import { log } from "../log";
 
-export type FactorKey = MatchFactor["key"];
+export type FactorKey = "must" | "nice" | "experience" | "sector" | "location";
+/** Weight per factor or dimension key; normalised to sum to 1. */
+export type Weights = Record<string, number>;
+/** A scoring dimension judged with cited evidence (built-in or the organisation's own). */
+export type Dimension = { key: string; label: string; hint: string; weight: number };
+
+/** Built-in judged dimensions: the same names as the requisition's weights. */
+export const BUILTIN_DIMENSIONS = {
+  career: {
+    label: "Career progression",
+    hint: "Growth in scope, seniority or responsibility across roles, relevant to this job.",
+  },
+  impact: {
+    label: "Impact",
+    hint: "Measurable outcomes the candidate delivered: numbers, results, things shipped or improved.",
+  },
+  education: {
+    label: "Education",
+    hint: "Degrees, certifications or training relevant to this job.",
+  },
+} as const;
+/** Share of the skills weight given to must-haves (the rest to nice-to-haves). */
+const MUST_SHARE = 0.75;
+
+export type RequisitionWeights = {
+  skills: number;
+  experience: number;
+  career: number;
+  impact: number;
+  education: number;
+  social: number;
+  custom: { key: string; label: string; hint: string; weight: number }[];
+};
+
+/**
+ * The requisition's split as ranking weights and judged dimensions. Social has
+ * no evidence in a CV profile, so its points are shared by the rest.
+ */
+export function weightsFromRequisition(r: RequisitionWeights): {
+  weights: Weights;
+  dimensions: Dimension[];
+} {
+  const dimensions: Dimension[] = [
+    ...(["career", "impact", "education"] as const)
+      .filter((k) => r[k] > 0)
+      .map((k) => ({ key: k, ...BUILTIN_DIMENSIONS[k], weight: r[k] })),
+    ...r.custom
+      .filter((d) => d.weight > 0 && d.label.trim())
+      .map((d) => ({ key: `custom:${d.key}`, label: d.label, hint: d.hint, weight: d.weight })),
+  ];
+  const raw: Weights = {
+    must: r.skills * MUST_SHARE,
+    nice: r.skills * (1 - MUST_SHARE),
+    experience: r.experience,
+    ...Object.fromEntries(dimensions.map((d) => [d.key, d.weight])),
+  };
+  return { weights: normalise(raw), dimensions };
+}
+
+function normalise(w: Weights): Weights {
+  const total = Object.values(w).reduce((a, b) => a + Math.max(0, b), 0) || 1;
+  return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.max(0, v) / total]));
+}
+
+/** Stamp of the judged dimensions: changing one re-reviews; changing weights only re-scores. */
+export function dimensionsStamp(dimensions: Dimension[]): string {
+  if (!dimensions.length) return "";
+  return createHash("sha256")
+    .update(JSON.stringify(dimensions.map((d) => [d.key, d.label, d.hint])))
+    .digest("hex")
+    .slice(0, 12);
+}
 export const DEFAULT_WEIGHTS: Record<FactorKey, number> = {
   must: 0.55,
   nice: 0.15,
@@ -74,12 +151,9 @@ export type PoolCandidate = {
 
 export type Expansion = { requirement: string; kind: "must" | "nice"; terms: string[] };
 
-export function normaliseWeights(w?: Partial<Record<FactorKey, number>> | null) {
-  const merged = { ...DEFAULT_WEIGHTS, ...(w ?? {}) };
-  const total = Object.values(merged).reduce((a, b) => a + Math.max(0, b), 0) || 1;
-  return Object.fromEntries(
-    Object.entries(merged).map(([k, v]) => [k, Math.max(0, v) / total]),
-  ) as Record<FactorKey, number>;
+/** Organisation default factor weights (used when a requisition has none of its own). */
+export function normaliseWeights(w?: Partial<Record<FactorKey, number>> | null): Weights {
+  return normalise({ ...DEFAULT_WEIGHTS, ...(w ?? {}) });
 }
 
 /** Words that carry no matching signal inside a long requirement sentence. */
@@ -131,7 +205,7 @@ export function coarseScore(
   c: PoolCandidate,
   req: RequirementProfile,
   expansions: Expansion[],
-  weights: Record<FactorKey, number>,
+  weights: Weights,
   sectorTerms: string[],
 ): CoarseResult {
   const hits = expansions.map((e) => {
@@ -228,21 +302,21 @@ export function coarseScore(
     ["sector", sector, []],
     ["location", location, []],
   ];
-  // A factor the JD does not define does not count (its weight is redistributed).
-  const present = factorList.filter(([, v]) => v !== null) as [
+  // A factor the JD does not define, or switched off (weight 0), does not count.
+  const present = factorList.filter(([k, v]) => v !== null && (weights[k] ?? 0) > 0) as [
     FactorKey,
     number,
     MatchEvidenceRef[],
   ][];
-  const wsum = present.reduce((a, [k]) => a + weights[k], 0) || 1;
-  const score = present.reduce((a, [k, v]) => a + (weights[k] / wsum) * v, 0);
+  const wsum = present.reduce((a, [k]) => a + (weights[k] ?? 0), 0) || 1;
+  const score = present.reduce((a, [k, v]) => a + ((weights[k] ?? 0) / wsum) * v, 0);
   return {
     candidateId: c.id,
     score: Math.round(score * 1000) / 1000,
     factors: present.map(([key, v, evidence]) => ({
       key,
       score: Math.round(v * 100) / 100,
-      weight: Math.round((weights[key] / wsum) * 100) / 100,
+      weight: Math.round(((weights[key] ?? 0) / wsum) * 100) / 100,
       evidence,
     })),
     requirementHits: hits,
@@ -263,6 +337,17 @@ const JudgeSchema = z.object({
       }),
     )
     .max(60),
+  dimensions: z
+    .array(
+      z.object({
+        id: z.string().max(8),
+        verdict: z.enum(["met", "partial", "missing"]),
+        claimIds: z.array(z.string().max(8)).max(6).default([]),
+        note: z.string().max(240).nullish().catch(null),
+      }),
+    )
+    .max(12)
+    .default([]),
   knockouts: z
     .array(
       z.object({
@@ -282,6 +367,8 @@ const JUDGE_SYSTEM =
   "(C1, C2, …) from the candidate profile that support it. Cite only claims that genuinely support the " +
   "requirement; with no supporting claim the verdict is missing. 'partial' means related but weaker or " +
   "narrower evidence. Equivalent wording counts (e.g. business development ≈ B2B sales). " +
+  "Then, for every scoring dimension (ids D1, D2, …) judge the same way in `dimensions`, using the " +
+  "dimension's description of what counts, and cite the supporting claim ids. " +
   "List knockouts only for location, right to work, language or experience clearly in conflict with the job. " +
   "rationale: 2–3 plain sentences a recruiter can read, naming the strongest evidence and the main gap. " +
   "Judge only what the profile shows; never assume. Respond with JSON only.";
@@ -293,7 +380,8 @@ function stableId(prefix: string, i: number) {
 export function scoreFromVerdicts(
   reqs: MatchRequirement[],
   coarse: CoarseResult,
-  weights: Record<FactorKey, number>,
+  weights: Weights,
+  dimensions: Dimension[] = [],
 ): { overall: number; factors: MatchFactor[] } {
   const val = (r: MatchRequirement) =>
     r.verdict === "missing"
@@ -304,7 +392,7 @@ export function scoreFromVerdicts(
     return xs.length ? xs.reduce((a, r) => a + val(r), 0) / xs.length : null;
   };
   const byKey = new Map(coarse.factors.map((f) => [f.key, f]));
-  const parts: [FactorKey, number | null, MatchEvidenceRef[]][] = [
+  const parts: [string, number | null, MatchEvidenceRef[], string | undefined][] = [
     [
       "must",
       avg("must"),
@@ -312,6 +400,7 @@ export function scoreFromVerdicts(
         .filter((r) => r.kind === "must")
         .flatMap((r) => r.evidence)
         .slice(0, 8),
+      undefined,
     ],
     [
       "nice",
@@ -320,20 +409,31 @@ export function scoreFromVerdicts(
         .filter((r) => r.kind === "nice")
         .flatMap((r) => r.evidence)
         .slice(0, 4),
+      undefined,
     ],
-    ["experience", byKey.get("experience")?.score ?? null, []],
-    ["sector", byKey.get("sector")?.score ?? null, []],
-    ["location", byKey.get("location")?.score ?? null, []],
+    ["experience", byKey.get("experience")?.score ?? null, [], undefined],
+    ["sector", byKey.get("sector")?.score ?? null, [], undefined],
+    ["location", byKey.get("location")?.score ?? null, [], undefined],
+    ...dimensions.map((d): [string, number | null, MatchEvidenceRef[], string] => {
+      const r = reqs.find((x) => x.kind === "dimension" && x.key === d.key);
+      return [d.key, r ? val(r) : null, r?.evidence.slice(0, 4) ?? [], d.label];
+    }),
   ];
-  const present = parts.filter(([, v]) => v !== null) as [FactorKey, number, MatchEvidenceRef[]][];
-  const wsum = present.reduce((a, [k]) => a + weights[k], 0) || 1;
-  const overall = present.reduce((a, [k, v]) => a + (weights[k] / wsum) * v, 0);
+  const present = parts.filter(([k, v]) => v !== null && (weights[k] ?? 0) > 0) as [
+    string,
+    number,
+    MatchEvidenceRef[],
+    string | undefined,
+  ][];
+  const wsum = present.reduce((a, [k]) => a + (weights[k] ?? 0), 0) || 1;
+  const overall = present.reduce((a, [k, v]) => a + ((weights[k] ?? 0) / wsum) * v, 0);
   return {
     overall: Math.round(overall * 100),
-    factors: present.map(([key, v, evidence]) => ({
+    factors: present.map(([key, v, evidence, label]) => ({
       key,
+      ...(label ? { label } : {}),
       score: Math.round(v * 100) / 100,
-      weight: Math.round((weights[key] / wsum) * 100) / 100,
+      weight: Math.round(((weights[key] ?? 0) / wsum) * 100) / 100,
       evidence,
     })),
   };
@@ -345,7 +445,8 @@ async function judgeCandidate(
   req: RequirementProfile,
   c: PoolCandidate,
   coarse: CoarseResult,
-  weights: Record<FactorKey, number>,
+  weights: Weights,
+  dimensions: Dimension[],
 ): Promise<{
   overall: number;
   factors: MatchFactor[];
@@ -371,6 +472,7 @@ async function judgeCandidate(
     req.rightToWork ? `Right to work: ${req.rightToWork}` : "",
     req.languages.length ? `Languages: ${req.languages.map((l) => l.name).join(", ")}` : "",
     ...reqList.map((r, i) => `${stableId("R", i)} [${r.kind}] ${r.text}`),
+    ...dimensions.map((d, i) => `${stableId("D", i)} [dimension] ${d.label}: ${d.hint}`),
   ]
     .filter(Boolean)
     .join("\n");
@@ -400,9 +502,20 @@ async function judgeCandidate(
   if (!res.ok) return null;
 
   const byClaim = new Map(claims.map((cl, i) => [stableId("C", i), cl]));
-  const byReq = new Map(res.data.requirements.map((r) => [r.id, r]));
-  const requirements: MatchRequirement[] = reqList.map((r, i) => {
-    const v = byReq.get(stableId("R", i));
+  const byReq = new Map(
+    [...res.data.requirements, ...res.data.dimensions].map((r) => [r.id, r] as const),
+  );
+  const items = [
+    ...reqList.map((r, i) => ({ ...r, id: stableId("R", i), key: undefined })),
+    ...dimensions.map((d, i) => ({
+      text: d.label,
+      kind: "dimension" as const,
+      id: stableId("D", i),
+      key: d.key,
+    })),
+  ];
+  const requirements: MatchRequirement[] = items.map((r) => {
+    const v = byReq.get(r.id);
     // Only citations that resolve to this candidate's claims count as evidence.
     const cited = (v?.claimIds ?? []).map((id) => byClaim.get(id)).filter((x) => x !== undefined);
     let verdict = v?.verdict ?? "missing";
@@ -418,13 +531,14 @@ async function judgeCandidate(
     return {
       requirement: r.text,
       kind: r.kind,
+      ...(r.key ? { key: r.key } : {}),
       verdict,
       strength,
       evidence: cited.map((x) => ({ claimId: x.id, versionId: x.versionId, passage: x.passage })),
       note: v?.note ?? null,
     };
   });
-  const { overall, factors } = scoreFromVerdicts(requirements, coarse, weights);
+  const { overall, factors } = scoreFromVerdicts(requirements, coarse, weights, dimensions);
   const knockouts = dedupeKnockouts([...coarse.knockouts, ...res.data.knockouts]);
   return { overall, factors, requirements, knockouts, rationale: res.data.rationale.trim() };
 }
@@ -587,10 +701,19 @@ export type RunOutcome = {
 export async function runRequisitionMatch(
   orgId: string,
   requisitionId: string,
-  opts: { topK?: number; weights?: Partial<Record<FactorKey, number>> | null } = {},
+  opts: { topK?: number; weights?: RequisitionWeights | null } = {},
 ): Promise<RunOutcome> {
   const [rq] = await db
-    .select({ status: requisitions.status })
+    .select({
+      status: requisitions.status,
+      skills: requisitions.weightSkills,
+      experience: requisitions.weightExperience,
+      career: requisitions.weightCareer,
+      impact: requisitions.weightImpact,
+      education: requisitions.weightEducation,
+      social: requisitions.weightSocial,
+      custom: requisitions.customWeights,
+    })
     .from(requisitions)
     .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
     .limit(1);
@@ -600,7 +723,11 @@ export async function runRequisitionMatch(
 
   const { profileOf } = await import("@/lib/capabilities.server");
   const settings = (await profileOf(orgId)).settings;
-  const weights = normaliseWeights(opts.weights ?? settings.profileMatchWeights);
+  const { weights, dimensions } = weightsFromRequisition(
+    opts.weights ?? { ...rq, custom: rq.custom ?? [] },
+  );
+  const dimStamp = dimensionsStamp(dimensions);
+  const stampOf = (c: PoolCandidate) => (dimStamp ? `${c.stamp}|${dimStamp}` : c.stamp);
   const topK = opts.topK ?? settings.profileMatchTopK ?? DEFAULT_TOP_K;
 
   const expansions = await expansionsFor(orgId, requisitionId, req);
@@ -616,6 +743,8 @@ export async function runRequisitionMatch(
       candidateId: profileMatchScores.candidateId,
       stage: profileMatchScores.reviewStage,
       stamp: profileMatchScores.profileStamp,
+      requirements: profileMatchScores.requirements,
+      overall: profileMatchScores.overallScore,
     })
     .from(profileMatchScores)
     .where(
@@ -653,8 +782,28 @@ export async function runRequisitionMatch(
   // Requirement review for the top K whose profile changed (or never reviewed).
   const top = coarse.slice(0, topK).filter(({ c }) => {
     const p = prior.get(c.id);
-    return !p || p.stage !== "judged" || p.stamp !== c.stamp;
+    return !p || p.stage !== "judged" || p.stamp !== stampOf(c);
   });
+
+  // Reviewed and unchanged: the verdicts stand, but the weights may have moved —
+  // re-score from the saved verdicts, no AI call.
+  const reviewIds = new Set(top.map(({ c }) => c.id));
+  for (const { c, r } of coarse) {
+    const p = prior.get(c.id);
+    if (!p || p.stage !== "judged" || reviewIds.has(c.id) || p.stamp !== stampOf(c)) continue;
+    const { overall, factors } = scoreFromVerdicts(p.requirements, r, weights, dimensions);
+    if (overall === p.overall) continue;
+    await db
+      .update(profileMatchScores)
+      .set({ overallScore: overall, factors })
+      .where(
+        and(
+          eq(profileMatchScores.orgId, orgId),
+          eq(profileMatchScores.requisitionId, requisitionId),
+          eq(profileMatchScores.candidateId, c.id),
+        ),
+      );
+  }
   const { spendCapRefusal } = await import("../ai-spend-cap");
   let judged = 0;
   let deferred = false;
@@ -666,7 +815,7 @@ export async function runRequisitionMatch(
         return;
       }
       try {
-        const j = await judgeCandidate(orgId, requisitionId, req, it.c, it.r, weights);
+        const j = await judgeCandidate(orgId, requisitionId, req, it.c, it.r, weights, dimensions);
         if (!j) continue;
         await db
           .update(profileMatchScores)
@@ -677,7 +826,7 @@ export async function runRequisitionMatch(
             requirements: j.requirements,
             knockouts: j.knockouts,
             rationale: j.rationale,
-            profileStamp: it.c.stamp,
+            profileStamp: stampOf(it.c),
             judgedAt: new Date(),
           })
           .where(

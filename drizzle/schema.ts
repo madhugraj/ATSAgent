@@ -5392,14 +5392,20 @@ export const sectorTaxonomyTerms = pgTable(
 
 export type MatchEvidenceRef = { claimId: string; versionId: string; passage: string };
 export type MatchFactor = {
-  key: "must" | "nice" | "experience" | "sector" | "location";
+  /** A built-in factor, a built-in judged dimension (career, impact, education) or `custom:<key>`. */
+  key: string;
+  /** Display label for judged dimensions (built-in factors are labelled in the UI). */
+  label?: string;
   score: number;
   weight: number;
   evidence: MatchEvidenceRef[];
 };
 export type MatchRequirement = {
   requirement: string;
-  kind: "must" | "nice";
+  /** "dimension": a requisition scoring dimension judged with cited evidence. */
+  kind: "must" | "nice" | "dimension";
+  /** For dimensions: the weight key it scores (career, impact, education, custom:<key>). */
+  key?: string;
   verdict: "met" | "partial" | "missing";
   strength: "demonstrated" | "listed" | "inferred" | null;
   evidence: MatchEvidenceRef[];
