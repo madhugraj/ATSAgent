@@ -188,6 +188,8 @@ All endpoints expect `Authorization: Bearer $CRON_SECRET`:
 | Screening-kit preparation              | `https://z-atsiq.yavar.ai/api/public/screening-prep`       | every 5 min     |
 | CV processing (claims, archive import) | `https://z-atsiq.yavar.ai/api/public/cv-processing`        | every 2 min     |
 
+Each CV-processing tick drains archive import, evidence extraction and ranking side by side, with up to `CV_PROCESSING_CONCURRENCY` (default 8, max 16) parallel AI calls per stage. Ranking for an organisation waits until its archive import and evidence queue are empty.
+
 ## 7. Example Kubernetes objects (sketch)
 
 ```yaml

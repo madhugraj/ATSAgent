@@ -8,7 +8,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Download, Loader2, Pause, Play, Upload, X } from "lucide-react";
+import { Download, Loader2, Pause, Play, Upload, X, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   archiveIssuesCsvFn,
   cancelArchiveImportFn,
+  removeArchiveImportFn,
   createArchiveImportFn,
   listArchiveImportsFn,
   pauseArchiveImportFn,
@@ -77,6 +78,7 @@ function ArchiveImportPage() {
   const start = useServerFn(startArchiveImportFn);
   const pause = useServerFn(pauseArchiveImportFn);
   const cancel = useServerFn(cancelArchiveImportFn);
+  const remove = useServerFn(removeArchiveImportFn);
   const issues = useServerFn(archiveIssuesCsvFn);
 
   const imports = useQuery({
@@ -143,10 +145,11 @@ function ArchiveImportPage() {
   }
 
   const act = useMutation({
-    mutationFn: async (a: { kind: "start" | "pause" | "cancel"; id: string }) => {
+    mutationFn: async (a: { kind: "start" | "pause" | "cancel" | "remove"; id: string }) => {
       const data = { importId: a.id };
       if (a.kind === "start") return start({ data });
       if (a.kind === "pause") return pause({ data });
+      if (a.kind === "remove") return remove({ data });
       return cancel({ data });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["archive_imports"] }),
@@ -242,7 +245,7 @@ function ImportCard({
 }: {
   imp: ArchiveImportView;
   busy: boolean;
-  onAct: (k: "start" | "pause" | "cancel") => void;
+  onAct: (k: "start" | "pause" | "cancel" | "remove") => void;
   onIssues: () => void;
 }) {
   const c = imp.counts;
@@ -253,7 +256,8 @@ function ImportCard({
   const cells: [string, number][] = imp.trialRun
     ? [
         ["Files", c.total],
-        ["Read", c.skipped],
+        // Files past the trial's limit are skipped unread.
+        ["Read", Math.min(c.skipped, imp.trialLimit ?? 250)],
         ["Failed", c.failed],
       ]
     : [
@@ -285,6 +289,11 @@ function ImportCard({
           {open ? (
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("cancel")}>
               <X className="size-4" /> Cancel
+            </Button>
+          ) : null}
+          {!open && (imp.trialRun || c.done + c.merged + c.needs_review === 0) ? (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("remove")}>
+              <Trash2 className="size-4" /> Remove
             </Button>
           ) : null}
           {c.failed + c.needs_review > 0 ? (

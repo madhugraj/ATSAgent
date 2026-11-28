@@ -759,7 +759,16 @@ export async function drainProfileMatches(
     update profile_match_runs set status = 'running', updated_at = now()
     where requisition_id in (
       select requisition_id from profile_match_runs
-      where status = 'queued' or (status = 'running' and updated_at < now() - interval '20 minutes')
+      where (status = 'queued' or (status = 'running' and updated_at < now() - interval '20 minutes'))
+        -- Hold ranking while the organisation is still importing or extracting
+        -- evidence: ranking a half-filled pool is redone as soon as it grows.
+        and not exists (
+          select 1 from candidate_archive_imports m
+          where m.org_id = profile_match_runs.org_id and m.status in ('staging', 'running'))
+        and not exists (
+          select 1 from candidate_cv_versions v
+          where v.org_id = profile_match_runs.org_id
+            and v.extraction_status in ('pending', 'running'))
       order by requested_at nulls last
       limit ${opts.limit ?? 2}
       for update skip locked

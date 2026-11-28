@@ -12,6 +12,12 @@ const Body = z.object({
   max: z.number().min(1).max(100).optional(),
 });
 
+/** Parallel AI calls per stage; override with CV_PROCESSING_CONCURRENCY. */
+const CONCURRENCY = Math.min(
+  Math.max(Number(process.env["CV_PROCESSING_CONCURRENCY"]) || 8, 1),
+  16,
+);
+
 async function run(request: Request) {
   const denied = await authenticateCronRequest(request);
   if (denied) return denied;
@@ -27,10 +33,15 @@ async function run(request: Request) {
   try {
     const { drainArchiveImports } = await import("@/server/candidates/archive-import.server");
     const { drainClaimsExtraction } = await import("@/server/candidates/versions.server");
-    const archive = await drainArchiveImports({ limit: Math.min(opts.max ?? 10, 25) });
-    const claims = await drainClaimsExtraction({ limit: opts.max ?? 20 });
     const { drainProfileMatches } = await import("@/server/candidates/profile-match.server");
-    const matching = await drainProfileMatches({ limit: 2 });
+    // The three stages drain independent queues, so they run side by side; each
+    // works through its batch with bounded parallel AI calls. Ranking holds off
+    // for an organisation until its import and evidence queues are empty.
+    const [archive, claims, matching] = await Promise.all([
+      drainArchiveImports({ limit: Math.min(opts.max ?? 24, 48), concurrency: CONCURRENCY }),
+      drainClaimsExtraction({ limit: opts.max ?? 24, concurrency: CONCURRENCY }),
+      drainProfileMatches({ limit: 2 }),
+    ]);
     return Response.json({ archive, claims, matching });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });

@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 // Deterministic "AI": the resume parser reads the name and email lines.
+let failParses = 0; // the next N CV reads fail (a provider timeout)
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
@@ -34,6 +35,10 @@ mock.module("../src/lib/ai-gateway.server", () => ({
     feature: string;
     schema?: { parse: (v: unknown) => unknown };
   }) => {
+    if (opts.feature === "resume_parse" && failParses > 0) {
+      failParses--;
+      return { ok: false, error: "AI request failed: The operation was aborted due to timeout" };
+    }
     const name = opts.prompt.match(/Name: ([^\n<]+)/)?.[1]?.trim() ?? null;
     const email = opts.prompt.match(/Email: ([^\s<]+)/)?.[1]?.trim() ?? null;
     const raw =
@@ -56,6 +61,7 @@ const {
   candidateArchiveImports,
   candidateArchiveItems,
   candidateCvVersions,
+  candidateIdentityKeys,
   candidates,
   organizations,
 } = await import("../drizzle/schema");
@@ -205,6 +211,97 @@ describe("trial and real import", () => {
       .where(eq(candidateArchiveItems.importId, again.id));
     expect(items.every((i) => i.status === "skipped" && i.candidateId)).toBe(true);
     expect(await db.select().from(candidates).where(eq(candidates.orgId, orgA))).toHaveLength(5);
+  });
+
+  test("a retry after an interrupted attempt counts as imported; a different CV of the same person is merged", async () => {
+    const first = await mkImport(false);
+    await archive.stageArchiveFile({
+      orgId: orgA,
+      importId: first.id,
+      fileName: "cv40.txt",
+      bytes: cv(40),
+    });
+    await run(first.id);
+    const [item] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, first.id));
+    // Interrupted before the file fingerprint was saved: the held-file check misses.
+    await db
+      .delete(candidateIdentityKeys)
+      .where(
+        and(
+          eq(candidateIdentityKeys.candidateId, item!.candidateId!),
+          eq(candidateIdentityKeys.keyType, "file_hash"),
+        ),
+      );
+    const retry = await mkImport(false);
+    await archive.stageArchiveFile({
+      orgId: orgA,
+      importId: retry.id,
+      fileName: "cv40.txt",
+      bytes: cv(40),
+    });
+    await run(retry.id);
+    const [again] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, retry.id));
+    expect(again!.candidateId).toBe(item!.candidateId);
+    expect(again!.status).toBe("done");
+
+    // Same person (same email), a different CV: a real merge.
+    const other = await mkImport(false);
+    const updated = new TextEncoder().encode(
+      new TextDecoder().decode(cv(40)) + " Now also leads a team of six account managers.",
+    );
+    await archive.stageArchiveFile({
+      orgId: orgA,
+      importId: other.id,
+      fileName: "cv40-2025.txt",
+      bytes: updated,
+    });
+    await run(other.id);
+    const [merged] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, other.id));
+    expect(merged!.candidateId).toBe(item!.candidateId);
+    expect(merged!.status).toBe("merged");
+  });
+
+  test("a failed CV read is retried, never saved as a placeholder candidate", async () => {
+    const imp = await mkImport(false);
+    await archive.stageArchiveFile({
+      orgId: orgA,
+      importId: imp.id,
+      fileName: "cv60.txt",
+      bytes: cv(60),
+    });
+    await db
+      .update(candidateArchiveImports)
+      .set({ status: "running", startedAt: new Date() })
+      .where(eq(candidateArchiveImports.id, imp.id));
+    failParses = 2;
+    await archive.drainArchiveImports({ limit: 5 });
+    let [item] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, imp.id));
+    expect(item!.status).toBe("pending");
+    expect(item!.candidateId).toBeNull();
+    await run(imp.id);
+    [item] = await db
+      .select()
+      .from(candidateArchiveItems)
+      .where(eq(candidateArchiveItems.importId, imp.id));
+    expect(item!.status).toBe("done");
+    const [person] = await db
+      .select()
+      .from(candidates)
+      .where(eq(candidates.id, item!.candidateId!));
+    expect(person!.fullName).toBe("Person 60 Archive");
+    expect(person!.skills).toContain("Sales");
   });
 
   test("at the spend cap items are deferred without burning attempts", async () => {
