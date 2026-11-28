@@ -19,6 +19,7 @@
 import { and, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import {
+  candidateCvVersions,
   aiUsageEvents,
   candidateArchiveImports,
   candidateArchiveItems,
@@ -296,11 +297,24 @@ async function processItem(it: Claimed): Promise<ArchiveItemStatus | "retry"> {
     source: "archive_import",
     resumeFile: { filename: it.file_name, bytes: staged.bytes },
   });
-  const status: ArchiveItemStatus = res.reviewQueued
-    ? "needs_review"
-    : res.merged
-      ? "merged"
-      : "done";
+  // A retry of an attempt that was interrupted after creating the candidate
+  // (before the file fingerprint was saved) "merges" into that same candidate:
+  // it holds no CV other than this file, so the file was imported, not merged.
+  let merged = res.merged;
+  if (merged && res.candidateId) {
+    const [{ n } = { n: 0 }] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(candidateCvVersions)
+      .where(
+        and(
+          eq(candidateCvVersions.orgId, it.org_id),
+          eq(candidateCvVersions.candidateId, res.candidateId),
+          sql`${candidateCvVersions.fileHash} is distinct from ${it.file_hash}`,
+        ),
+      );
+    if (n === 0) merged = false;
+  }
+  const status: ArchiveItemStatus = res.reviewQueued ? "needs_review" : merged ? "merged" : "done";
   await finishItem(it, status, { candidateId: res.candidateId });
   return status;
 }
